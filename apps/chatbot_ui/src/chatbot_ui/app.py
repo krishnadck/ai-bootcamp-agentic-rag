@@ -1,7 +1,4 @@
 import streamlit as st
-from openai import OpenAI
-from google import genai
-from groq import Groq
 
 from chatbot_ui.core.config import config
 import requests  
@@ -37,45 +34,26 @@ def api_call(method, url, **kwargs):
     except Exception as e:
         _show_error_popup(f"An unexpected error occurred: {str(e)}")
         return False, {"message": f"An unexpected error occurred {str(e)}."}
-    
-    
-with st.sidebar:
-    st.title("Settings")
-    
-    
-    provider = st.selectbox("Select a provider", ["openai", "google", "groq"])
-    
-    if provider == "openai":
-        model_name = st.selectbox("Select a model", ["gpt-5-nano", "gpt-5-mini"])
-    elif provider == "google":
-        model_name = st.selectbox("Select a model", ["gemini-2.5-flash"])
-    elif provider == "groq":
-        model_name = st.selectbox("Select a model", ["llama-3.3-70b-versatile"])
-    else:
-        model_names = st.selectbox("Select a model", ["gemini-2.5-flash", "llama-3.3-70b-versatile"])
 
-    st.session_state.provider = provider
-    st.session_state.model_name = model_name
 
 if "messages" not in st.session_state:
-    st.session_state.messages = [{"role": "assistant", "content": "Hello, how can I help you today?"}]
+    st.session_state.messages = [{"role": "assistant", "content": "Hello, how can I help you on Amazon Products?"}]
     
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-if prompt := st.chat_input("Hello, how can I help you today?"):
+if prompt := st.chat_input("Hello, how can I help you on Amazon Products?"):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
     
     with st.chat_message("assistant"):
-        output = api_call("post", f"{config.API_URL}/chat", 
-                          json={"provider": st.session_state.provider, 
-                                "model_name": st.session_state.model_name, 
-                                "messages": st.session_state.messages})
+        output = api_call("post", f"{config.API_URL}", 
+                          json={"query": prompt})
+        #st.write(output)
         response_data = output[1]
-        answer = response_data["message"]
+        answer = response_data["answer"]
         st.write(answer)
-    st.session_state.messages.append({"role": "assistant", "content": answer})
-
+        if output[0]:
+            st.session_state.messages.append({"role": "assistant", "content": answer})

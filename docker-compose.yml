@@ -19,5 +19,19 @@ services:
       - 8000:8000
     env_file:
       - .env
+    restart: unless-stopped
     volumes:
       - ./apps/api/src:/app/apps/api/src
+    depends_on:
+      - qdrant
+
+  qdrant:
+    image: qdrant/qdrant
+    ports:
+      - 6333:6333
+      - 6334:6334 # grpc
+    volumes:
+      - ./qdrant_storage:/qdrant/storage:z
+    environment:
+      - QDRANT__STORAGE__PATH=/qdrant/storage
+    restart: unless-stopped

@@ -12,8 +12,6 @@ ENV UV_LINK_MODE=copy
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev
 
-COPY src ./src/
-
 ENV PATH="/app/.venv/bin:$PATH"
 ENV PYTHONPATH="/app/apps/chatbot_ui/src:$PYTHONPATH"
 

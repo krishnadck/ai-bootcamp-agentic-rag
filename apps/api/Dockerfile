@@ -28,5 +28,5 @@ ENV HOME=/app
 
 EXPOSE 8000
 
-CMD ["uvicorn", "api.app:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+CMD ["uvicorn", "server.app:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
 

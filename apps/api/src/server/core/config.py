@@ -6,5 +6,6 @@ class Config(BaseSettings):
     openai_api_key: str
     google_api_key: str
     groq_api_key: str
+    qdrant_url: str = "http://qdrant:6333"
 
 config = Config()
