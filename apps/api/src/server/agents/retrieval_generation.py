@@ -1,16 +1,34 @@
 from qdrant_client import QdrantClient
 import openai
 from server.core.config import config
+from langsmith import traceable, get_current_run_tree
 
-
+@traceable(
+    name="generate_embeddings",
+    description="Generate embeddings for a given query or text using OpenAI's text-embedding-3-small model",   
+    run_type="embedding",
+    metadata={"ls_provider": "openai", "ls_model": "text-embedding-3-small"}
+)
 def create_embeddings(text, model="text-embedding-3-small"):
     response = openai.embeddings.create(
         model=model,
         input=text
     )
+    
+    current_run = get_current_run_tree()
+    
+    if current_run:
+        current_run.metadata["usage_metadata"] = {
+            "total_tokens": response.usage.total_tokens,
+            "input_tokens": response.usage.prompt_tokens,
+        }
+        
     return response.data[0].embedding
 
-
+@traceable(name="retrieve_embedding_data", 
+description="Retrieve embedding data from Qdrant for a given query and collection name",
+run_type="retriever"
+)
 def retrieve_embedding_data(qd_client: QdrantClient, query, collection_name, k=5):
     response = qd_client.query_points(
         collection_name=collection_name,
@@ -37,12 +55,18 @@ def retrieve_embedding_data(qd_client: QdrantClient, query, collection_name, k=5
         "context_ratings": retrieved_context_ratings
     }
 
+@traceable(
+    name="format_context",
+    description="Format the retrieved context into a string",
+    run_type="retriever"
+)
 def format_context(retrived_context):
     formatted_context = ""
     for id, chunk, rating in zip(retrived_context["context_ids"], retrived_context["context"], retrived_context["context_ratings"]):
         formatted_context += f"Product ID: {id}, rating: {rating}, description: {chunk.strip()}\n"
     return formatted_context
 
+@traceable(name="construct_prompt", run_type="prompt")
 def build_prompt(preprocessed_context, question):
     prompt = f"""
 You are a specialized Product Expert Assistant. Your goal is to answer customer questions accurately using ONLY the provided product information.
@@ -65,6 +89,11 @@ You are a specialized Product Expert Assistant. Your goal is to answer customer 
 """
     return prompt
 
+@traceable(name="generate_llm_response",
+description="Generate a response from the LLM using the prompt",
+run_type="llm",
+metadata={"ls_provider": "openai", "ls_model_name": "gpt-5-nano"}
+)
 def generate_llm_response(prompt, model="gpt-5-nano"):
     response = openai.chat.completions.create(
         model=model,
@@ -72,8 +101,23 @@ def generate_llm_response(prompt, model="gpt-5-nano"):
             {"role": "system", "content": prompt},
         ]
     )
+    
+    current_run = get_current_run_tree()
+    
+    if current_run:
+        current_run.metadata["usage_metadata"] = {
+            "input_tokens": response.usage.prompt_tokens,
+            "output_tokens": response.usage.completion_tokens,
+            "total_tokens": response.usage.total_tokens,
+            "model": model
+        }
+        
     return response.choices[0].message.content
 
+@traceable(
+    name="integrated_rag_pipeline",
+    description="Integrate the RAG pipeline for a given question",
+)
 def integrated_rag_pipeline(question, model="gpt-5-nano"):
     
     qdrant_client = QdrantClient(   
@@ -92,4 +136,13 @@ def integrated_rag_pipeline(question, model="gpt-5-nano"):
     prompt = build_prompt(formatted_context, question)
     # Step 4: Generate response
     response = generate_llm_response(prompt, model)
-    return response
+    
+    final_response = {
+        "question": question,
+        "answer": response,
+        "retrieved_context_ids": retrieved_context["context_ids"],
+        "retrieved_context": retrieved_context["context"],
+        "similarity_scores": retrieved_context["scores"],
+    }
+        
+    return final_response

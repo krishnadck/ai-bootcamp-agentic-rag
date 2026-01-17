@@ -13,6 +13,6 @@ class RAGRequest(BaseModel):
 
 class RAGResponse(BaseModel):
     request_id: str = Field(..., description="The request id")
-    answer: str = Field(..., description="The answer to the query")
+    response: dict = Field(..., description="The answer to the query")
     
     

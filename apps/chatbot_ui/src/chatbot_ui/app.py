@@ -52,7 +52,7 @@ if prompt := st.chat_input("Hello, how can I help you on Amazon Products?"):
         output = api_call("post", f"{config.API_URL}", 
                           json={"query": prompt})
         #st.write(output)
-        response_data = output[1]
+        response_data = output[1]["response"]
         answer = response_data["answer"]
         st.write(answer)
         if output[0]:

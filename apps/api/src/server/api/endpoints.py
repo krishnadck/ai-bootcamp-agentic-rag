@@ -12,7 +12,7 @@ router = APIRouter()
 @router.post("/")
 async def amazon_product_assistant(request: Request, payload: RAGRequest) -> RAGResponse:
     response = integrated_rag_pipeline(payload.query)
-    return RAGResponse(request_id=request.state.request_id, answer=response)
+    return RAGResponse(request_id=request.state.request_id, response=response)
 
 api_router = APIRouter()
 api_router.include_router(router, prefix="/product_assistant", tags=["rag"])
