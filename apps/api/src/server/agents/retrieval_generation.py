@@ -8,6 +8,7 @@ import numpy as np
 from qdrant_client.models import Filter, FieldCondition, MatchValue
 from qdrant_client.models import Document, Prefetch, FusionQuery
 from server.agents.utils.prompt_management import get_prompt_from_config
+from server.agents.reranker import get_reranker
 
 @traceable(
     name="generate_embeddings",
@@ -35,7 +36,7 @@ def create_embeddings(text, model="text-embedding-3-small"):
 description="Retrieve embedding data from Qdrant for a given query and collection name",
 run_type="retriever"
 )
-def retrieve_embedding_data(qd_client: QdrantClient, query, collection_name, k=5):
+def retrieve_embedding_data(qd_client: QdrantClient, query, collection_name, k=10):
     
     querry_embeddings = create_embeddings(query)
     
@@ -71,6 +72,34 @@ def retrieve_embedding_data(qd_client: QdrantClient, query, collection_name, k=5
         "context": retrieved_context,
         "scores": retrieved_scores,
         "context_ratings": retrieved_context_ratings
+    }
+
+@traceable(name="rerank_retrieved_context", 
+           description="Rerank the retrieved context using the Cohere reranker", 
+           run_type="reranker")
+def rerank_retrieved_context(query,retrieved_context):
+    reranker = get_reranker(provider="cohere")
+    context_list = retrieved_context["context"]
+    reranked_context = reranker.rerank(query=query, documents=context_list, top_n=5)
+    
+    reranked_retrieved_context_ids = []
+    reranked_retrieved_context = []
+    reranked_retrieved_scores = []
+    reranked_retrieved_context_ratings = []
+    
+    for new_context in reranked_context:
+        index = new_context.get("index")
+        reranked_retrieved_context_ids.append(retrieved_context["context_ids"][index])
+        reranked_retrieved_context.append(retrieved_context["context"][index])
+        reranked_retrieved_scores.append(retrieved_context["scores"][index])
+        reranked_retrieved_context_ratings.append(retrieved_context["context_ratings"][index])
+    
+    #return only top 5 results    
+    return {
+        "context_ids": reranked_retrieved_context_ids,
+        "context": reranked_retrieved_context,
+        "scores": reranked_retrieved_scores,
+        "context_ratings": reranked_retrieved_context_ratings
     }
 
 @traceable(
@@ -123,7 +152,7 @@ def generate_llm_response(prompt, model="gpt-4.1-mini"):
     name="integrated_rag_pipeline",
     description="Integrate the RAG pipeline for a given question",
 )
-def integrated_rag_pipeline(question, model="gpt-4.1-mini", top_k=5):
+def integrated_rag_pipeline(question, model="gpt-4.1-mini", top_k=10):
     
     qdrant_client = QdrantClient(   
         url=config.qdrant_url,
@@ -135,8 +164,11 @@ def integrated_rag_pipeline(question, model="gpt-4.1-mini", top_k=5):
         collection_name="amazon_items-collection-hybrid-02",
         k=top_k
     )
+    # step 1.1: Rerank the retrieved context
+    reranked_context = rerank_retrieved_context(question, retrieved_context)
+    
     # Step 2: Format context
-    formatted_context = format_context(retrieved_context)   
+    formatted_context = format_context(reranked_context)   
     # Step 3: Build prompt
     prompt = build_prompt(formatted_context, question)
     # Step 4: Generate response
@@ -153,7 +185,7 @@ def integrated_rag_pipeline(question, model="gpt-4.1-mini", top_k=5):
         
     return final_response
 
-def rag_pipeline_wrapper(question, top_k=5):
+def rag_pipeline_wrapper(question, top_k=10):
     
     qdrant_client = QdrantClient(   
         url=config.qdrant_url,

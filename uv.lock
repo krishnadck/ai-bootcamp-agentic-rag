@@ -32,8 +32,10 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "api" },
     { name = "cohere" },
     { name = "fastembed" },
+    { name = "flashrank" },
     { name = "jupyter" },
     { name = "langgraph" },
     { name = "langsmith" },
@@ -57,8 +59,10 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "api", editable = "apps/api" },
     { name = "cohere", specifier = ">=5.20.2" },
     { name = "fastembed", specifier = ">=0.7.4" },
+    { name = "flashrank", specifier = ">=0.2.10" },
     { name = "jupyter", specifier = ">=1.1.1" },
     { name = "langgraph", specifier = ">=1.0.6" },
     { name = "langsmith", specifier = ">=0.6.4" },
@@ -228,6 +232,7 @@ source = { editable = "apps/api" }
 dependencies = [
     { name = "cohere" },
     { name = "fastapi" },
+    { name = "flashrank" },
     { name = "google-genai" },
     { name = "groq" },
     { name = "instructor" },
@@ -243,6 +248,7 @@ dependencies = [
 requires-dist = [
     { name = "cohere", specifier = ">=5.20.2" },
     { name = "fastapi", specifier = ">=0.128.0" },
+    { name = "flashrank", specifier = ">=0.2.10" },
     { name = "google-genai", specifier = ">=1.57.0" },
     { name = "groq", specifier = ">=1.0.0" },
     { name = "instructor", specifier = ">=1.14.4" },
@@ -915,6 +921,22 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/1d/65/ce7f1b70157833bf3cb851b556a37d4547ceafc158aa9b34b36782f23696/filelock-3.20.3.tar.gz", hash = "sha256:18c57ee915c7ec61cff0ecf7f0f869936c7c30191bb0cf406f1341778d0834e1", size = 19485, upload-time = "2026-01-09T17:55:05.421Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b5/36/7fb70f04bf00bc646cd5bb45aa9eddb15e19437a28b8fb2b4a5249fac770/filelock-3.20.3-py3-none-any.whl", hash = "sha256:4b0dda527ee31078689fc205ec4f1c1bf7d56cf88b6dc9426c4f230e46c2dce1", size = 16701, upload-time = "2026-01-09T17:55:04.334Z" },
+]
+
+[[package]]
+name = "flashrank"
+version = "0.2.10"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+    { name = "onnxruntime" },
+    { name = "requests" },
+    { name = "tokenizers" },
+    { name = "tqdm" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/55/1f/176cb4a857a70c3538f637e19389ab6aed21548a1ba1d1424fccc8bba108/FlashRank-0.2.10.tar.gz", hash = "sha256:f8f82a25c32fdfc668a09dc4089421d6aab8e7f71308424b541f40bb3f01d9db", size = 18905, upload-time = "2025-01-06T13:33:01.657Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ec/99/72639cc1c9221c5bc77a2df1c2d352fe11965553bdf7d3e0856e7fcc8fd6/FlashRank-0.2.10-py3-none-any.whl", hash = "sha256:5d3272ae657d793c132d1e7917ed9e2adf49e0e1c60735583a67b051c6f0434a", size = 14511, upload-time = "2025-01-06T13:32:59.42Z" },
 ]
 
 [[package]]
