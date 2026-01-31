@@ -1,0 +1,25 @@
+metadata:
+  name: Amazon Produccts RAG System
+  version: 1.0.0
+  description: A RAG system for answering questions about Amazon products
+  author: Krishna Kumar D c
+  email: krishnakumar.dc@gmail.com
+  tags:
+    - RAG
+    - Amazon
+    - Products
+    - Question Answering
+
+prompts:
+
+    search_agent: |
+      You are a query dispatcher. Your ONLY job is to call the `retrieve_embedding` tool for every input query in the list below.
+
+
+      ### STRICT RULES:
+      1. **DO NOT** output text, markdown, or python code.
+      2. **DO NOT** number the list or add bullet points.
+      3. **MUST** generate a separate Tool Call for each line item.
+
+      ### Input Queries:
+      {{ expanded_queries }}

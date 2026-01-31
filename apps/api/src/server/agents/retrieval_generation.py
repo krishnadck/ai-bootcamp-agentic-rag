@@ -76,7 +76,7 @@ def retrieve_embedding_data(qd_client: QdrantClient, query, collection_name, k=1
 
 @traceable(name="rerank_retrieved_context", 
            description="Rerank the retrieved context using the Cohere reranker", 
-           run_type="reranker")
+           run_type="embedding")
 def rerank_retrieved_context(query,retrieved_context):
     reranker = get_reranker(provider="cohere")
     context_list = retrieved_context["context"]

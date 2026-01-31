@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Request, HTTPException
 from server.api.models import RAGRequest, RAGResponse
 import logging
-from server.agents.retrieval_generation import rag_pipeline_wrapper
+from server.agents.graph import rag_pipeline_wrapper
 from server.api.models import RAGUsedContext
 
 logging.basicConfig(level=logging.INFO,
