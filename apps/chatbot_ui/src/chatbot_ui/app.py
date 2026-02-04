@@ -1,5 +1,6 @@
 import streamlit as st
 import html
+import uuid
 
 from chatbot_ui.core.config import config
 import requests  
@@ -62,7 +63,7 @@ def api_call(method, url, **kwargs):
         return False, response_data
     
     except requests.exceptions.ConnectionError as e:
-        _show_error_popup(f"Connection Error. Please check your internet connection and try again.")
+        _show_error_popup("Connection Error. Please check your internet connection and try again.")
         return False, {"message": f"Connection Error. {str(e)}"}
     except requests.exceptions.Timeout:
         _show_error_popup("Request Timeout. Please try again later.")
@@ -98,6 +99,8 @@ def render_used_context(context_items, container):
         )
 
 
+if "thread_id" not in st.session_state:
+    st.session_state.thread_id = str(uuid.uuid4())
 if "messages" not in st.session_state:
     st.session_state.messages = [{"role": "assistant", "content": "Hello, how can I help you on Amazon Products?"}]
 if "latest_context" not in st.session_state:
@@ -113,8 +116,11 @@ if prompt := st.chat_input("Hello, how can I help you on Amazon Products?"):
         st.markdown(prompt)
     
     with st.chat_message("assistant"):
-        output = api_call("post", f"{config.API_URL}", 
-                          json={"query": prompt})
+        output = api_call(
+            "post",
+            f"{config.API_URL}",
+            json={"query": prompt, "thread_id": st.session_state.thread_id},
+        )
         if output[0]:
             answer = output[1].get("answer", "")
             used_context = output[1].get("used_context", [])
@@ -128,6 +134,13 @@ if prompt := st.chat_input("Hello, how can I help you on Amazon Products?"):
             st.write(output[1].get("message", "Request failed."))
 
 with st.sidebar:
+    if st.button("Reset conversation", use_container_width=True):
+        st.session_state.thread_id = str(uuid.uuid4())
+        st.session_state.messages = [
+            {"role": "assistant", "content": "Hello, how can I help you on Amazon Products?"}
+        ]
+        st.session_state.latest_context = []
+        st.rerun()
     if st.session_state.latest_context:
         render_used_context(st.session_state.latest_context, st.sidebar)
     else:

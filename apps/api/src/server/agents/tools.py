@@ -58,8 +58,6 @@ def rerank_retrieved_context(query,retrieved_context):
         "context_ratings": reranked_retrieved_context_ratings
     }
 
-@tool("retrieve_embedding", description="Retrieve embedding data from Qdrant for a given query", 
-      response_format="content_and_artifact")
 def retrieve_embedding(query: str) -> List[str]:
     """
     Retrieves a list of relevant product context strings from a Qdrant database using hybrid search (embedding and BM25 fusion) based on the given user query.
@@ -119,4 +117,4 @@ def retrieve_embedding(query: str) -> List[str]:
         product_context = f"Product ID: {item} - Description: {context} - Rating: {rating}"
         reranked_retrieved_contextdata.append(product_context)
 
-    return json.dumps(reranked_retrieved_contextdata), reranked_retrieved_contextdata 
+    return reranked_retrieved_contextdata

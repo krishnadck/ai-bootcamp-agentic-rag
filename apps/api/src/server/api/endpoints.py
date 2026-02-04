@@ -12,7 +12,8 @@ router = APIRouter()
 
 @router.post("/")
 async def amazon_product_assistant(request: Request, payload: RAGRequest) -> RAGResponse:
-    response = rag_pipeline_wrapper(payload.query)
+    logger.info(f"Received request: {payload.query} with thread_id: {payload.thread_id}")
+    response = rag_pipeline_wrapper(payload.query, thread_id=payload.thread_id)
     return RAGResponse(request_id=request.state.request_id, answer=response["answer"], 
                        used_context=[RAGUsedContext(**item) for item in response["used_context"]])
 

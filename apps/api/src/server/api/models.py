@@ -11,6 +11,7 @@ class ChatResponse(BaseModel):
     
 class RAGRequest(BaseModel):
     query: str = Field(..., description="The query to search the RAG database on amazon products")
+    thread_id: str = Field(..., description="The thread id")
     
 class RAGUsedContext(BaseModel):
     id: str = Field(..., description="The id of the product used to answer the question")

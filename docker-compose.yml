@@ -37,3 +37,16 @@ services:
     environment:
       - QDRANT__STORAGE__PATH=/qdrant/storage
     restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - 5432:5432
+    environment:
+      POSTGRES_DB: langgraph_db
+      POSTGRES_USER: langgraph_user
+      POSTGRES_PASSWORD: langgraph_password
+      PGDATA: /var/lib/postgresql/data/pgdata
+    restart: unless-stopped
+    volumes:
+      - ./postgres_data:/var/lib/postgresql/data

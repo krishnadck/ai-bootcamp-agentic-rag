@@ -3,13 +3,16 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.prebuilt import tools_condition
 from langgraph.prebuilt import ToolNode
 from server.agents.tools import retrieve_embedding
-from server.agents.agents import router_node, query_rewriter_node, agent_node, aggregation_node
+from server.agents.agents import router_node, query_rewriter_node, agent_node
 from langchain_core.messages import AIMessage
 from typing import Literal
 from qdrant_client import QdrantClient
 from qdrant_client.models import Filter, FieldCondition, MatchValue
 import numpy as np
 from server.core.config import config
+from langgraph.checkpoint.postgres import PostgresSaver
+from server.agents.utils.utils import get_tool_descriptions
+
 
 # edges and graph definitions
 
@@ -29,20 +32,17 @@ def custome_route_edge(state: State) -> Literal["ageaggregation_nodent", "tools"
     """
     #print(state.messages)
     
-    tool_calls_count = 0
-    for m in state.messages:
-        if m.tool_calls and isinstance(m, AIMessage):
-            tool_calls_count += len(m.tool_calls)
+    if state.final_answer:
+        return "end"
     
-    print(f"tool_calls_count: {tool_calls_count}")
+    if state.iteration > 2:
+        return "end"
     
-    if tool_calls_count == 0:
-        return "aggregation"
-    
-    if tools_condition(state.messages) == "tools" and tool_calls_count <= len(state.expanded_queries):
+    if len(state.tool_calls) > 0:
         return "tools"
     
-    return "aggregation"
+    return "end"
+
 
 def build_graph():
     graphbuilder2 = StateGraph(State)
@@ -51,32 +51,52 @@ def build_graph():
     graphbuilder2.add_node("router", router_node)
     graphbuilder2.add_node("query_rewriter", query_rewriter_node)
     graphbuilder2.add_node("agent_node", agent_node)
-    graphbuilder2.add_node("aggregation", aggregation_node)
     graphbuilder2.add_node("tools", tools_node)
 
     graphbuilder2.add_edge(START, "router")
     graphbuilder2.add_conditional_edges("router", router_conditional_edge, {"query_rewriter": "query_rewriter", END: END})
     graphbuilder2.add_edge("query_rewriter", "agent_node")
-    graphbuilder2.add_conditional_edges("agent_node", custome_route_edge, {"tools": "tools", "aggregation": "aggregation", END: "aggregation"})
-    graphbuilder2.add_edge("tools", "aggregation")
-    graphbuilder2.add_edge("aggregation", END)
+    graphbuilder2.add_conditional_edges("agent_node", custome_route_edge, {"tools": "tools", "end": END})
+    graphbuilder2.add_edge("tools", "agent_node")
 
-    agg_graph_1 = graphbuilder2.compile()
-    return agg_graph_1
+    return graphbuilder2
 
 
-def rag_pipeline_wrapper(question, top_k=10):
+tools=[retrieve_embedding]
+tool_descriptions = get_tool_descriptions(tools)
+
+def run_agent(question, thread_id):
+    
+    graph_builder = build_graph()
+    
+    initial_state = {
+    "messages": [question],
+    "available_tools": tool_descriptions,
+    "iteration": 0,
+    "final_answer": False,
+    }
+
+    thread_config = {
+        "configurable": {
+            "thread_id": thread_id
+        }
+    }
+
+    with PostgresSaver.from_conn_string(config.postgres_url) as saver:
+        
+        graph = graph_builder.compile(checkpointer=saver)
+        result = graph.invoke(initial_state, config=thread_config)
+    
+    return result
+    
+def rag_pipeline_wrapper(question, thread_id=None):
     
     qdrant_client = QdrantClient(   
         url=config.qdrant_url,
     )
     
-    graph = build_graph()
+    result = run_agent(question, thread_id)
     
-    initial_state = State(user_query=question)
-    
-    result = graph.invoke(initial_state)
-            
     used_context = []
     
     dummy_vector = np.zeros(1536).tolist()
