@@ -3,6 +3,7 @@ import logging
 from server.api.middleware import RequestIDMiddleware
 from starlette.middleware.cors import CORSMiddleware
 from server.api.endpoints import api_router
+from server.api.routers.feedback import feedback_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -22,3 +23,4 @@ app.add_middleware(middleware_class=CORSMiddleware,
                    )
 
 app.include_router(api_router)
+app.include_router(feedback_router)

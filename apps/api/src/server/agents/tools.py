@@ -1,6 +1,6 @@
 from langchain_core.tools import tool
 from qdrant_client import QdrantClient
-from qdrant_client.models import Document, Prefetch, FusionQuery
+from qdrant_client.models import Document, Prefetch, FusionQuery, Filter, FieldCondition, MatchAny
 import openai
 from langsmith import traceable, get_current_run_tree
 import json
@@ -58,29 +58,17 @@ def rerank_retrieved_context(query,retrieved_context):
         "context_ratings": reranked_retrieved_context_ratings
     }
 
-def retrieve_embedding(query: str) -> List[str]:
-    """
-    Retrieves a list of relevant product context strings from a Qdrant database using hybrid search (embedding and BM25 fusion) based on the given user query.
-
-    Args:
-        query (str): The user's search query for desired product(s).
-
-    Returns:
-        List[str]: Each string contains the product ID, description, and average rating, formatted as:
-            'Product ID: <ASIN> - Description: <description> - Rating: <rating>'
-    """
-    
+def _retrieve_products_context(query: str, k: int = 5) -> dict:
+    """Retrieve and rerank product context for a query."""
     qd_client = QdrantClient(url=config.qdrant_url)
-    
+
     collection_name = "amazon_items-collection-hybrid-02"
-    k=5
-    
-    querry_embeddings = create_embeddings(query)
-    
+    query_embeddings = create_embeddings(query)
+
     response = qd_client.query_points(
         collection_name=collection_name,
         prefetch=[Prefetch(
-            query=querry_embeddings,
+            query=query_embeddings,
             using="text-embedding-3-small",
             limit=20),
             Prefetch(
@@ -95,13 +83,13 @@ def retrieve_embedding(query: str) -> List[str]:
     retrieved_context = []
     retrieved_scores = []
     retrieved_context_ratings = []
-    
+
     for point in response.points:
         retrieved_context_ids.append(point.payload["parent_asin"])
         retrieved_context.append(point.payload["description"])
         retrieved_scores.append(point.score)
         retrieved_context_ratings.append(point.payload["average_rating"])
-        
+
     retrieved_context_data = {
         "context_ids": retrieved_context_ids,
         "context": retrieved_context,
@@ -109,7 +97,22 @@ def retrieve_embedding(query: str) -> List[str]:
         "context_ratings": retrieved_context_ratings
     }
 
-    reranked_context = rerank_retrieved_context(query, retrieved_context_data)
+    return rerank_retrieved_context(query, retrieved_context_data)
+
+
+def retrieve_products(query: str) -> List[str]:
+    """
+    Retrieves a list of relevant product context strings from a Qdrant database using hybrid search (embedding and BM25 fusion) based on the given user query.
+
+    Args:
+        query (str): The user's search query for desired product(s).
+
+    Returns:
+        List[str]: Each string contains the product ID, description, and average rating, formatted as:
+            'Product ID: <ASIN> - Description: <description> - Rating: <rating>'
+    """
+    
+    reranked_context = _retrieve_products_context(query=query, k=5)
 
     reranked_retrieved_contextdata = []
     for item, context, rating in zip(reranked_context["context_ids"], 
@@ -118,3 +121,103 @@ def retrieve_embedding(query: str) -> List[str]:
         reranked_retrieved_contextdata.append(product_context)
 
     return reranked_retrieved_contextdata
+
+
+def retrieve_embedding(query: str) -> List[str]:
+    """Backward-compatible alias for retrieve_products."""
+    return retrieve_products(query)
+
+@traceable(name="retrieve_reviews",
+           description="Retrieve reviews for a given query and product ids",
+           run_type="retriever")
+def retrieve_reviews(query, product_ids, k=5):
+    # INSERT_YOUR_CODE
+    """
+    Retrieve reviews for a given query and list of product IDs.
+
+    Args:
+        query (str): The query string to search relevant reviews.
+        product_ids (List[str]): A list of product IDs (parent_asin) for which reviews are to be retrieved.
+        k (int, optional): The number of top reviews to retrieve. Defaults to 5.
+
+    Returns:
+        dict: A dictionary containing:
+            - 'retrieved_context_ids': List of product IDs corresponding to each retrieved review.
+            - 'retrieved_context': List of review texts retrieved for the query and product IDs.
+            - 'similarity_scores': List of similarity scores for each retrieved review.
+    """
+    qdrant_client = QdrantClient(url=config.qdrant_url)
+    
+    collection_name = "amazon-item-collection-hybrid-01-reviews"
+    k=5
+    
+    querry_embeddings = create_embeddings(query)
+    
+    try:
+    
+        response = qdrant_client.query_points(
+            collection_name=collection_name,
+            prefetch=[Prefetch(
+                query=querry_embeddings,
+                filter=Filter(
+                    must=[
+                        FieldCondition(key="parent_asin", 
+                                        match=MatchAny(any=product_ids))
+                        
+                        ]
+                        
+                    ),
+                    limit=20
+                )
+            ],
+            query=FusionQuery(fusion="rrf"),
+            limit=k
+        )
+        
+        retrieved_context_ids = []
+        retrieved_context = []
+        similarity_scores = []
+
+        for result in response.points:
+            retrieved_context_ids.append(result.payload["parent_asin"])
+            retrieved_context.append(result.payload["text"])
+            similarity_scores.append(result.score)
+    except Exception as e:
+        print(f"Error retrieving reviews: {e}")
+        raise e
+    
+    return {
+        "retrieved_context_ids": retrieved_context_ids,
+        "retrieved_context": retrieved_context,
+        "similarity_scores": similarity_scores,
+    }
+
+@traceable(
+    name="format_retrieved_reviews_context",
+    run_type="prompt"
+)
+def process_reviews_context(context):
+
+    formatted_context = ""
+
+    for id, chunk in zip(context["retrieved_context_ids"], context["retrieved_context"]):
+        formatted_context += f"- ID: {id}, review: {chunk}\n"
+
+    return formatted_context
+
+def get_formatted_reviews_context(query: str, item_list: list, top_k: int = 15) -> str:
+    """Get the top k reviews matching a query for a list of prefiltered items.
+    
+    Args:
+        query: The query to get the top k reviews for
+        item_list: The list of item IDs to prefilter for before running the query
+        top_k: The number of reviews to retrieve, this should be at least 20 if multipple items are prefiltered
+    
+    Returns:
+        A string of the top k context chunks with IDs prepending each chunk, each representing a review for a given inventory item for a given query.
+    """
+
+    context = retrieve_reviews(query, item_list, top_k)
+    formatted_context = process_reviews_context(context)
+
+    return formatted_context

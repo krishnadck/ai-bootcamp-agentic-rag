@@ -2,7 +2,7 @@ from server.agents.models import State
 from langgraph.graph import StateGraph, START, END
 from langgraph.prebuilt import tools_condition
 from langgraph.prebuilt import ToolNode
-from server.agents.tools import retrieve_embedding
+from server.agents.tools import retrieve_products, get_formatted_reviews_context
 from server.agents.agents import router_node, query_rewriter_node, agent_node
 from langchain_core.messages import AIMessage
 from typing import Literal
@@ -47,7 +47,7 @@ def custome_route_edge(state: State) -> Literal["ageaggregation_nodent", "tools"
 def build_graph():
     graphbuilder2 = StateGraph(State)
 
-    tools_node = ToolNode(tools=[retrieve_embedding])
+    tools_node = ToolNode(tools=[retrieve_products, get_formatted_reviews_context])
     graphbuilder2.add_node("router", router_node)
     graphbuilder2.add_node("query_rewriter", query_rewriter_node)
     graphbuilder2.add_node("agent_node", agent_node)
@@ -62,7 +62,7 @@ def build_graph():
     return graphbuilder2
 
 
-tools=[retrieve_embedding]
+tools=[retrieve_products, get_formatted_reviews_context]
 tool_descriptions = get_tool_descriptions(tools)
 
 def run_agent(question, thread_id):
@@ -132,5 +132,6 @@ def rag_pipeline_wrapper(question, thread_id=None):
     return {
         "answer": result.get("answer", ""),
         "used_context": used_context,
+        "trace_id": result.get("trace_id", None)
     }
     

@@ -1,4 +1,4 @@
-from server.agents.tools import retrieve_embedding
+from server.agents.tools import retrieve_products
 from server.agents.models import QueryRewriteResponse, QueryRelevanceResponse
 from server.agents.utils.prompt_management import get_prompt_from_config
 from langchain_core.messages import ToolMessage
@@ -10,6 +10,7 @@ from langsmith import traceable
 from server.agents.utils.utils import format_ai_message
 from server.agents.models import AgentResponse
 from langchain_core.messages import AIMessage, convert_to_openai_messages
+from langsmith import get_current_run_tree
 
 @traceable(name="query_rewriter_node", 
 description="This function rewrites the query to be more specific to include multiple statements",
@@ -55,9 +56,22 @@ def router_node(state: State) -> State:
         temperature=0.4
     )
     
+    current_run = get_current_run_tree()
+
+    if current_run:
+        current_run.metadata["usage_metadata"] = {
+            "input_tokens": raw_response.usage.prompt_tokens,
+            "output_tokens": raw_response.usage.completion_tokens,
+            "total_tokens": raw_response.usage.total_tokens
+        }
+        trace_id = str(getattr(current_run, "trace_id", current_run.id))
+    else:
+        trace_id = None
+        
     return {
         "query_relevant": response.query_relevant,
-        "answer": response.reason
+        "answer": response.reason,
+        "trace_id": trace_id
     }
 
 def sanitize_history(messages):
@@ -132,6 +146,18 @@ def agent_node(state: State) -> State:
         temperature=0.5,
     )
     
+    current_run = get_current_run_tree()
+    
+    if current_run:
+        current_run.metadata["usage_metadata"] = {
+            "input_tokens": raw_response.usage.prompt_tokens,
+            "output_tokens": raw_response.usage.completion_tokens,
+            "total_tokens": raw_response.usage.total_tokens
+        }
+        trace_id = str(getattr(current_run, "trace_id", current_run.id))
+    else:
+        trace_id = None
+        
     ai_message = format_ai_message(response)
 
     return {
@@ -140,6 +166,6 @@ def agent_node(state: State) -> State:
         "iteration": state.iteration + 1,
         "answer": response.answer,
         "final_answer": response.final_answer,
-        "references": response.references
+        "references": response.references,
+        "trace_id": trace_id
     }
-

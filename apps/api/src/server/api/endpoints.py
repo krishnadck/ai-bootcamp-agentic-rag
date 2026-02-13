@@ -15,7 +15,8 @@ async def amazon_product_assistant(request: Request, payload: RAGRequest) -> RAG
     logger.info(f"Received request: {payload.query} with thread_id: {payload.thread_id}")
     response = rag_pipeline_wrapper(payload.query, thread_id=payload.thread_id)
     return RAGResponse(request_id=request.state.request_id, answer=response["answer"], 
-                       used_context=[RAGUsedContext(**item) for item in response["used_context"]])
+                       used_context=[RAGUsedContext(**item) for item in response["used_context"]],
+                       trace_id=response["trace_id"])
 
 api_router = APIRouter()
 api_router.include_router(router, prefix="/product_assistant", tags=["rag"])

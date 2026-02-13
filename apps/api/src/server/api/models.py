@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional
+from pydantic import UUID4
 
 class ChatRequest(BaseModel):
     provider: str
@@ -23,5 +24,4 @@ class RAGResponse(BaseModel):
     request_id: str = Field(..., description="The request id")
     used_context: list[RAGUsedContext] = Field(..., description="used context to answer the question")
     answer: str = Field(..., description="The answer to the question")
-    
-    
+    trace_id: str = Field(..., description="The trace id")

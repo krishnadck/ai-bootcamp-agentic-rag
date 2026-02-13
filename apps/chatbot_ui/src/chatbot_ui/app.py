@@ -57,7 +57,7 @@ def api_call(method, url, **kwargs):
         except requests.exceptions.JSONDecodeError:
             response_data = {"message": "Invalid JSON formt response"}
         
-        if response.status_code == 200:
+        if response.status_code in (200, 201):
             return True, response_data
         
         return False, response_data
@@ -99,16 +99,74 @@ def render_used_context(context_items, container):
         )
 
 
+def get_feedback_url():
+    base_url = config.API_URL.rsplit("/", 1)[0]
+    return f"{base_url}/feedback"
+
+
+def submit_feedback(run_id, score, comment=""):
+    # print the values of run_id, score, comment
+    print(f"run_id: {run_id}, score: {score}, comment: {comment}")
+    payload = {
+        "run_id": run_id,
+        "score": score,
+        "comment": comment,
+        "source": "api",
+    }
+    return api_call("post", get_feedback_url(), json=payload)
+
+
 if "thread_id" not in st.session_state:
     st.session_state.thread_id = str(uuid.uuid4())
 if "messages" not in st.session_state:
     st.session_state.messages = [{"role": "assistant", "content": "Hello, how can I help you on Amazon Products?"}]
 if "latest_context" not in st.session_state:
     st.session_state.latest_context = []
+if "feedback" not in st.session_state:
+    st.session_state.feedback = {}
+if "feedback_open" not in st.session_state:
+    st.session_state.feedback_open = {}
     
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
+        if message["role"] == "assistant":
+            run_id = message.get("run_id")
+            if not run_id:
+                st.caption("Feedback unavailable for this response.")
+            else:
+                feedback_entry = st.session_state.feedback.get(run_id)
+                if feedback_entry:
+                    st.caption("Thanks for your feedback.")
+                else:
+                    col_up, col_down = st.columns([1, 1])
+                    with col_up:
+                        if st.button("👍", key=f"feedback_up_{run_id}", disabled=not run_id):
+                            result = submit_feedback(run_id, 1)
+                            if result[0]:
+                                st.session_state.feedback[run_id] = {"score": 1, "comment": ""}
+                                st.rerun()
+                            else:
+                                st.error(result[1].get("message", "Failed to submit feedback."))
+                    with col_down:
+                        if st.button("👎", key=f"feedback_down_{run_id}", disabled=not run_id):
+                            st.session_state.feedback_open[run_id] = True
+                    if st.session_state.feedback_open.get(run_id):
+                        comment_key = f"feedback_comment_{run_id}"
+                        st.text_area(
+                            "Reason for thumbs down (optional)",
+                            key=comment_key,
+                            placeholder="Tell us what was missing or incorrect.",
+                        )
+                        if st.button("Submit feedback", key=f"feedback_submit_{run_id}"):
+                            comment = st.session_state.get(comment_key, "")
+                            result = submit_feedback(run_id, 0, comment)
+                            if result[0]:
+                                st.session_state.feedback[run_id] = {"score": 0, "comment": comment}
+                                st.session_state.feedback_open[run_id] = False
+                                st.rerun()
+                            else:
+                                st.error(result[1].get("message", "Failed to submit feedback."))
 
 if prompt := st.chat_input("Hello, how can I help you on Amazon Products?"):
     st.session_state.messages.append({"role": "user", "content": prompt})
@@ -124,10 +182,11 @@ if prompt := st.chat_input("Hello, how can I help you on Amazon Products?"):
         if output[0]:
             answer = output[1].get("answer", "")
             used_context = output[1].get("used_context", [])
+            run_id = output[1].get("trace_id") if output[1].get("trace_id") else None
             st.write(answer)
             st.session_state.latest_context = used_context
             st.session_state.messages.append(
-                {"role": "assistant", "content": answer}
+                {"role": "assistant", "content": answer, "run_id": run_id}
             )
             st.rerun()
         else:

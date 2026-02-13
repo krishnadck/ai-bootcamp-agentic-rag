@@ -20,10 +20,12 @@ class AgentResponse(BaseModel):
 class RAGResponse(BaseModel):
     answer: str = Field(description="The answer to the question")
     references: List[RAGUsedContext] = Field(description="List of RAG Context items used to answer the question")
+    trace_id: str = Field(description="The trace ID of the run", default=None)
     
 class QueryRelevanceResponse(BaseModel):
     query_relevant: bool
     reason: str
+    
 
 class QueryRewriteResponse(BaseModel):
     search_queries: List[str]
@@ -41,4 +43,5 @@ class State(BaseModel):
     answer: str = ""
     query_relevant: bool = False
     tool_calls: List[Toolcall] = []
-    references: Annotated[List[RAGUsedContext], add] = []
+    references: List[RAGUsedContext] = []
+    trace_id: str = Field(description="The trace ID of the run", default=None)

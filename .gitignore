@@ -210,4 +210,27 @@ __marimo__/
 qdrant_data/
 qdrant_storage/
 
+# Data directories
 /data
+/postgres_data
+postgres_data/
+
+# Cursor
+.cursor/
+.cursorignore
+.cursorindexingignore
+.cursorrules
+
+# Claude Code
+.claude/
+
+# Docker
+docker-compose.override.yml
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/

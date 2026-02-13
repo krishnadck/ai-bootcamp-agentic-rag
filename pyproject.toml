@@ -23,6 +23,8 @@ dependencies = [
 members = [
     "apps/api",
     "apps/chatbot_ui",
+    "apps/products_mcp_server",
+    "apps/reviews_mcp_server",
 ]
 
 [tool.uv.sources]
@@ -33,6 +35,7 @@ dev = [
     "api",
     "cohere>=5.20.2",
     "fastembed>=0.7.4",
+    "fastmcp>=2.14.5",
     "flashrank>=0.2.10",
     "jupyter>=1.1.1",
     "langgraph>=1.0.6",
