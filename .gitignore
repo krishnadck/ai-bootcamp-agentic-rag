@@ -214,6 +214,8 @@ qdrant_storage/
 /data
 /postgres_data
 postgres_data/
+postgres_data/*
+postgres_data/pgdata
 
 # Cursor
 .cursor/
