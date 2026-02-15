@@ -1,6 +1,7 @@
 import streamlit as st
 import html
 import uuid
+import json
 
 from chatbot_ui.core.config import config
 import requests  
@@ -73,6 +74,56 @@ def api_call(method, url, **kwargs):
         return False, {"message": f"An unexpected error occurred {str(e)}."}
 
 
+def stream_agent_events(url, payload):
+
+    def _show_error_popup(message):
+        st.session_state["error_popup"] = {
+            "visible": True,
+            "message": message,
+        }
+
+    try:
+        with requests.post(url, json=payload, stream=True, timeout=120) as response:
+            if response.status_code != 200:
+                try:
+                    error_data = response.json()
+                except requests.exceptions.JSONDecodeError:
+                    error_data = {"message": response.text or "Streaming request failed."}
+                yield {"type": "error", "message": error_data.get("message", "Streaming request failed.")}
+                return
+
+            for raw_line in response.iter_lines(decode_unicode=True):
+                if not raw_line:
+                    continue
+
+                line = raw_line.strip()
+                if not line.startswith("data:"):
+                    continue
+
+                data = line[len("data:") :].strip()
+                if data in ("[DONE]", "data: [DONE]"):
+                    break
+
+                try:
+                    payload_data = json.loads(data)
+                    if isinstance(payload_data, dict) and "answer" in payload_data:
+                        yield {"type": "final", "payload": payload_data}
+                    else:
+                        yield {"type": "status", "message": data}
+                except json.JSONDecodeError:
+                    yield {"type": "status", "message": data}
+
+    except requests.exceptions.ConnectionError:
+        _show_error_popup("Connection Error. Please check your internet connection and try again.")
+        yield {"type": "error", "message": "Connection Error. Please check your internet connection and try again."}
+    except requests.exceptions.Timeout:
+        _show_error_popup("Request Timeout. Please try again later.")
+        yield {"type": "error", "message": "Request Timeout. Please try again later."}
+    except Exception as e:
+        _show_error_popup(f"An unexpected error occurred: {str(e)}")
+        yield {"type": "error", "message": f"An unexpected error occurred: {str(e)}"}
+
+
 def render_used_context(context_items, container):
     container.markdown("**Suggestions**")
     for item in context_items:
@@ -139,7 +190,8 @@ for message in st.session_state.messages:
                 if feedback_entry:
                     st.caption("Thanks for your feedback.")
                 else:
-                    col_up, col_down = st.columns([1, 1])
+                    # Keep feedback actions visually grouped instead of splitting the row.
+                    col_up, col_down, _ = st.columns([1, 1, 12], gap="small")
                     with col_up:
                         if st.button("👍", key=f"feedback_up_{run_id}", disabled=not run_id):
                             result = submit_feedback(run_id, 1)
@@ -174,15 +226,27 @@ if prompt := st.chat_input("Hello, how can I help you on Amazon Products?"):
         st.markdown(prompt)
     
     with st.chat_message("assistant"):
-        output = api_call(
-            "post",
+        status_placeholder = st.empty()
+        final_payload = None
+        streaming_error = None
+
+        for event in stream_agent_events(
             f"{config.API_URL}",
-            json={"query": prompt, "thread_id": st.session_state.thread_id},
-        )
-        if output[0]:
-            answer = output[1].get("answer", "")
-            used_context = output[1].get("used_context", [])
-            run_id = output[1].get("trace_id") if output[1].get("trace_id") else None
+            {"query": prompt, "thread_id": st.session_state.thread_id},
+        ):
+            if event["type"] == "status":
+                status_placeholder.caption(event["message"])
+            elif event["type"] == "final":
+                final_payload = event["payload"]
+            elif event["type"] == "error":
+                streaming_error = event["message"]
+                break
+
+        if final_payload:
+            status_placeholder.empty()
+            answer = final_payload.get("answer", "")
+            used_context = final_payload.get("used_context", [])
+            run_id = final_payload.get("trace_id") if final_payload.get("trace_id") else None
             st.write(answer)
             st.session_state.latest_context = used_context
             st.session_state.messages.append(
@@ -190,7 +254,7 @@ if prompt := st.chat_input("Hello, how can I help you on Amazon Products?"):
             )
             st.rerun()
         else:
-            st.write(output[1].get("message", "Request failed."))
+            st.write(streaming_error or "Request failed.")
 
 with st.sidebar:
     if st.button("Reset conversation", use_container_width=True):
