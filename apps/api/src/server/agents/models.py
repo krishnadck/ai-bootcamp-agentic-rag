@@ -11,37 +11,52 @@ class RAGUsedContext(BaseModel):
     id: str = Field(description="The ID of the item used to answer the question")
     description: str = Field(description="Short description of the item used to answer the question")
 
-class AgentResponse(BaseModel):
-    answer: str = Field(description="Answer to the question.")
-    references: list[RAGUsedContext] = Field(description="List of items used to answer the question.")
-    final_answer: bool = False
-    tool_calls: List[Toolcall] = []
-
 class RAGResponse(BaseModel):
     answer: str = Field(description="The answer to the question")
     references: List[RAGUsedContext] = Field(description="List of RAG Context items used to answer the question")
     trace_id: str = Field(description="The trace ID of the run", default=None)
-    
-class QueryRelevanceResponse(BaseModel):
-    query_relevant: bool
-    reason: str
-    
-
-class QueryRewriteResponse(BaseModel):
-    search_queries: List[str]
-    
-class AggregationResponse(BaseModel):
-    answer: str = Field(description="The answer to the question in a list format.")
-    references: List[RAGUsedContext] = Field(description="List of RAG Context items used to answer the question")
-    
-class State(BaseModel):
-    messages: Annotated[List[Any], add_messages] = []
-    expanded_queries: List[str] = []
+        
+class AgentProperties(BaseModel):
     final_answer: bool = False
     iteration: int = 0
     available_tools: List[Dict[str, Any]] = []
-    answer: str = ""
-    query_relevant: bool = False
     tool_calls: List[Toolcall] = []
-    references: List[RAGUsedContext] = []
+    
+class Delegation(BaseModel):
+    agent: str
+    query: str
+    
+class CoOrdinatorAgentProperties(BaseModel):
+    final_answer: bool = False
+    iteration: int = 0
+    plan: List[Delegation] = []
+    next_agent: str = ""
+
+class CoOrdinatorAgentResponse(BaseModel):
+    next_agent: str
+    final_answer: bool = False
+    answer: str = ""
+    plan: List[Delegation] = []
+    
+class ProductQnAAgentResponse(BaseModel):
+    answer: str = Field(description="Answer to the question.", default="")
+    references: list[RAGUsedContext] = Field(description="List of items used to answer the question.")
+    final_answer: bool = False
+    tool_calls: List[Toolcall] = []
+
+class ShoppingCartAgentResponse(BaseModel):
+    answer: str = Field(description="Answer to the question.", default="")
+    final_answer: bool = False
+    tool_calls: List[Toolcall] = []
+
+class State(BaseModel):
+    messages: Annotated[List[Any], add_messages] = []
+    user_intent: str = ""
+    product_qna_agent: AgentProperties = Field(default_factory=AgentProperties)
+    shopping_cart_agent: AgentProperties = Field(default_factory=AgentProperties)
+    co_ordinator_agent: CoOrdinatorAgentProperties = Field(default_factory=CoOrdinatorAgentProperties)
+    references: Annotated[List[RAGUsedContext], add] = []
+    answer: str = ""
+    user_id: str = ""
+    cart_id: str = ""
     trace_id: str = Field(description="The trace ID of the run", default=None)

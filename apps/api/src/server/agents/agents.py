@@ -1,78 +1,15 @@
-from server.agents.tools import retrieve_products
-from server.agents.models import QueryRewriteResponse, QueryRelevanceResponse
 from server.agents.utils.prompt_management import get_prompt_from_config
 from langchain_core.messages import ToolMessage
 from server.agents.models import State
 import instructor
 from openai import OpenAI
-from langchain_openai import ChatOpenAI
 from langsmith import traceable
 from server.agents.utils.utils import format_ai_message
-from server.agents.models import AgentResponse
 from langchain_core.messages import AIMessage, convert_to_openai_messages
 from langsmith import get_current_run_tree
+from server.agents.models import ProductQnAAgentResponse, ShoppingCartAgentResponse, CoOrdinatorAgentResponse
+from server.agents.utils.utils import normalize_tool_calls
 
-@traceable(name="query_rewriter_node", 
-description="This function rewrites the query to be more specific to include multiple statements",
-run_type="prompt"
-)
-def query_rewriter_node(state: State) -> str:
-    """
-    This function rewrites the query to be more specific to include multiple statements
-    """
-    template = get_prompt_from_config('/app/apps/api/src/server/agents/prompts/query_expand_agent.yml', 
-                                      'query_expand_agent')
-    
-    prompt = template.render(query=state.messages[-1].content)
-    
-    client = instructor.from_openai(OpenAI())
-    
-    response, raw_response = client.chat.completions.create_with_completion(
-        model="gpt-4o-mini",
-        response_model=QueryRewriteResponse,
-        messages=[{"role": "system", "content": prompt}],
-        temperature=0.4
-    )
-    return {
-        "expanded_queries": response.search_queries
-    }
-    
-# add router node to evaluate the user query and decide the next node to execute
-def router_node(state: State) -> State:
-    """
-    This function evaluates the user query and decides the next node to execute
-    """
-    
-    template = get_prompt_from_config('/app/apps/api/src/server/agents/prompts/router_agent.yml', 'router_agent')
-    
-    prompt = template.render(question=state.messages[-1].content)
-    
-    client = instructor.from_openai(OpenAI())
-    
-    response, raw_response = client.chat.completions.create_with_completion(
-        model="gpt-4o-mini",
-        response_model=QueryRelevanceResponse,
-        messages=[{"role": "system", "content": prompt}],
-        temperature=0.4
-    )
-    
-    current_run = get_current_run_tree()
-
-    if current_run:
-        current_run.metadata["usage_metadata"] = {
-            "input_tokens": raw_response.usage.prompt_tokens,
-            "output_tokens": raw_response.usage.completion_tokens,
-            "total_tokens": raw_response.usage.total_tokens
-        }
-        trace_id = str(getattr(current_run, "trace_id", current_run.id))
-    else:
-        trace_id = None
-        
-    return {
-        "query_relevant": response.query_relevant,
-        "answer": response.reason,
-        "trace_id": trace_id
-    }
 
 def sanitize_history(messages):
     """
@@ -122,16 +59,16 @@ def sanitize_history(messages):
 description="This function uses the RAG pipeline to perform search on the products",
 run_type="llm"
 )
-def agent_node(state: State) -> State:
+def product_qna_agent_node(state: State) -> State:
     """
     This function uses the RAG pipeline to perform search on the products
     """
     template = get_prompt_from_config('/app/apps/api/src/server/agents/prompts/search_agent.yml', 'search_agent')
     
-    prompt = template.render(available_tools=state.available_tools)
+    prompt = template.render(available_tools=state.product_qna_agent.available_tools)
 
     messages = sanitize_history(state.messages)
-
+    
     conversation = []
 
     for message in messages:
@@ -140,10 +77,112 @@ def agent_node(state: State) -> State:
     client = instructor.from_openai(OpenAI())
 
     response, raw_response = client.chat.completions.create_with_completion(
-        model="gpt-4.1-mini",
-        response_model=AgentResponse,
+        model="gpt-4o-mini",
+        response_model=ProductQnAAgentResponse,
         messages=[{"role": "system", "content": prompt}, *conversation],
-        temperature=0.5,
+        temperature=0,
+    )
+    
+    current_run = get_current_run_tree()
+    
+    if current_run:
+        current_run.metadata["usage_metadata"] = {
+            "input_tokens": raw_response.usage.prompt_tokens,
+            "output_tokens": raw_response.usage.completion_tokens,
+            "total_tokens": raw_response.usage.total_tokens
+        }
+    
+    ai_message = format_ai_message(response)
+    
+    ai_message = normalize_tool_calls(ai_message)
+    
+
+    return {
+        "messages": [ai_message],
+        "product_qna_agent": {
+            "tool_calls": [tool_call.model_dump() for tool_call in response.tool_calls],
+            "iteration": state.product_qna_agent.iteration + 1,
+            "final_answer": response.final_answer,
+            "available_tools": state.product_qna_agent.available_tools
+        },
+        "answer": response.answer,
+        "references": response.references
+    }
+
+@traceable(name="shopping_cart_agent_node", 
+description="This function uses the Shopping Cart tools to add, get and remove items from the cart.",
+run_type="llm"
+)
+def shopping_cart_agent_node(state: State) -> State:
+    """
+    This function uses the Shopping Cart tools to add, get and remove items from the cart.
+    """
+    
+    template = get_prompt_from_config('/app/apps/api/src/server/agents/prompts/shopping_cart_agent.yml', 'shopping_cart_agent')
+    
+    prompt = template.render(user_id=state.user_id, cart_id=state.cart_id, available_tools=state.shopping_cart_agent.available_tools)
+    
+    conversation = []
+    for message in state.messages:
+        conversation.append(convert_to_openai_messages(message))
+        
+    client = instructor.from_openai(OpenAI())
+    
+    response, raw_response = client.chat.completions.create_with_completion(
+        model="gpt-4o-mini",
+        response_model=ShoppingCartAgentResponse,
+        messages=[{"role": "system", "content": prompt}, *conversation],
+        temperature=0,
+    )
+    
+    current_run = get_current_run_tree()
+    
+    if current_run:
+        current_run.metadata["usage_metadata"] = {
+            "input_tokens": raw_response.usage.prompt_tokens,
+            "output_tokens": raw_response.usage.completion_tokens,
+            "total_tokens": raw_response.usage.total_tokens
+        }
+    
+    ai_message = format_ai_message(response)
+    
+    ai_message = normalize_tool_calls(ai_message)
+    
+    return {
+        "messages": [ai_message],
+        "shopping_cart_agent": {
+            "tool_calls": [tool_call.model_dump() for tool_call in response.tool_calls],
+            "iteration": state.shopping_cart_agent.iteration + 1,
+            "final_answer": response.final_answer,
+            "available_tools": state.shopping_cart_agent.available_tools
+        },
+        "answer": response.answer
+    }
+
+@traceable(name="coordinator_agent_node", 
+description="This function evaluates the user query and decides the next node to execute",
+run_type="llm"
+)
+def coordinator_agent_node(state: State) -> State:
+    """
+    This function evaluates the user query and decides the next node to execute
+    """
+    prompt_template = get_prompt_from_config('/app/apps/api/src/server/agents/prompts/coordinator_agent.yml', 'coordinator_agent')
+    
+    prompt = prompt_template.render()
+    
+    conversation = []
+    
+    for message in state.messages:
+        conversation.append(convert_to_openai_messages(message))
+    
+    client = instructor.from_openai(OpenAI())
+    
+    response, raw_response = client.chat.completions.create_with_completion(
+        model="gpt-4o-mini",
+        response_model=CoOrdinatorAgentResponse,
+        messages=[{"role": "system", "content": prompt}, *conversation],
+        temperature=0.0
     )
     
     current_run = get_current_run_tree()
@@ -157,15 +196,20 @@ def agent_node(state: State) -> State:
         trace_id = str(getattr(current_run, "trace_id", current_run.id))
     else:
         trace_id = None
-        
-    ai_message = format_ai_message(response)
+    
+    if response.final_answer:
+        ai_message = [AIMessage(content=response.answer)]
+    else:
+        ai_message = []
 
     return {
-        "messages": [ai_message],
-        "tool_calls": response.tool_calls,
-        "iteration": state.iteration + 1,
-        "answer": response.answer,
-        "final_answer": response.final_answer,
-        "references": response.references,
-        "trace_id": trace_id
+       "messages": ai_message,
+       "answer": response.answer,
+       "co_ordinator_agent": {
+           "iteration": state.co_ordinator_agent.iteration + 1,
+           "final_answer": response.final_answer,
+           "plan": [plan.model_dump() for plan in response.plan],
+           "next_agent": response.next_agent
+       },
+       "trace_id": trace_id
     }

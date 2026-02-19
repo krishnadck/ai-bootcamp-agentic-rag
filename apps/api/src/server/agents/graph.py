@@ -1,8 +1,8 @@
 from server.agents.models import State
 from langgraph.graph import StateGraph, START, END
 from langgraph.prebuilt import ToolNode
-from server.agents.tools import retrieve_products, get_formatted_reviews_context
-from server.agents.agents import router_node, query_rewriter_node, agent_node
+from server.agents.tools import retrieve_products, fetch_formatted_reviews_context, add_to_shopping_cart, read_shopping_cart, remove_item_from_cart
+from server.agents.agents import product_qna_agent_node, shopping_cart_agent_node, coordinator_agent_node
 from typing import Literal
 from qdrant_client import QdrantClient
 from qdrant_client.models import Filter, FieldCondition, MatchValue
@@ -12,127 +12,79 @@ from langgraph.checkpoint.postgres import PostgresSaver
 from server.agents.utils.utils import get_tool_descriptions
 import json
 
-
 # edges and graph definitions
 
-def router_conditional_edge(state: State) -> Literal["query_rewriter", END]:
+def product_qa_router_edge(state: State) -> Literal["tools", "coordinator_agent"]:
     """
     This function decides the next node to execute based on the user query
     """
-    if state.query_relevant:
-        return "query_rewriter"
+    if state.product_qna_agent.iteration > 4:
+        return "coordinator_agent"
+    elif state.product_qna_agent.final_answer and len(state.co_ordinator_agent.plan) == 0:
+        return "coordinator_agent"
+    elif len(state.product_qna_agent.tool_calls) > 0:
+        return "tools"
+    else:
+        return "coordinator_agent"
+
+def shopping_cart_router_edge(state: State) -> Literal["tools", "coordinator_agent"]:
+    """ 
+    This function decides the next node to execute based on the user query
+    """
+    
+    if state.shopping_cart_agent.iteration > 2:
+        return "coordinator_agent"
+    elif len(state.shopping_cart_agent.tool_calls) > 0:
+        return "tools"
+    if state.shopping_cart_agent.final_answer:
+        return "coordinator_agent"
+    else:
+        return "coordinator_agent"
+    
+def coOrdinator_agent_router_edge(state: State) -> Literal["product_qna_agent", "shopping_cart_agent", END]:
+    """
+    This function decides the next node to execute based on the user query
+    """
+    if state.co_ordinator_agent.final_answer:
+        return END
+    elif state.co_ordinator_agent.iteration > 3:
+        return END
+    elif state.co_ordinator_agent.next_agent == "product_qa_agent":
+        return "product_qna_agent"
+    elif state.co_ordinator_agent.next_agent == "shopping_cart_agent":
+        return "shopping_cart_agent"
     else:
         return END
 
-# define custom route edge to decide the tool call or agent node or aggregation node
-def custome_route_edge(state: State) -> Literal["ageaggregation_nodent", "tools", END]:
-    """
-    This function decides the next node to execute based on the user query
-    """
-    #print(state.messages)
-    
-    if state.final_answer:
-        return "end"
-    
-    if state.iteration > 2:
-        return "end"
-    
-    if len(state.tool_calls) > 0:
-        return "tools"
-    
-    return "end"
+product_qna_agent_tools=[retrieve_products, fetch_formatted_reviews_context]
+product_qna_agent_tools_descriptions = get_tool_descriptions(product_qna_agent_tools)
 
-
+shopping_cart_agent_tools=[add_to_shopping_cart, remove_item_from_cart, read_shopping_cart]
+shopping_cart_tool_descriptions = get_tool_descriptions(shopping_cart_agent_tools)
+    
 def build_graph():
     graphbuilder2 = StateGraph(State)
+    qna_tools_node = ToolNode(tools=product_qna_agent_tools)
+    shopping_cart_tools_node = ToolNode(tools=shopping_cart_agent_tools)
 
-    tools_node = ToolNode(tools=[retrieve_products, get_formatted_reviews_context])
-    graphbuilder2.add_node("router", router_node)
-    graphbuilder2.add_node("query_rewriter", query_rewriter_node)
-    graphbuilder2.add_node("agent_node", agent_node)
-    graphbuilder2.add_node("tools", tools_node)
+    graphbuilder2.add_node("coordinator_agent", coordinator_agent_node)
+    graphbuilder2.add_node("product_qna_agent", product_qna_agent_node)
+    graphbuilder2.add_node("shopping_cart_agent", shopping_cart_agent_node)
 
-    graphbuilder2.add_edge(START, "router")
-    graphbuilder2.add_conditional_edges("router", router_conditional_edge, {"query_rewriter": "query_rewriter", END: END})
-    graphbuilder2.add_edge("query_rewriter", "agent_node")
-    graphbuilder2.add_conditional_edges("agent_node", custome_route_edge, {"tools": "tools", "end": END})
-    graphbuilder2.add_edge("tools", "agent_node")
+    graphbuilder2.add_node("product_qna_tools", qna_tools_node)
+    graphbuilder2.add_node("shopping_cart_tools", shopping_cart_tools_node)
+
+    graphbuilder2.add_edge(START, "coordinator_agent")
+
+    graphbuilder2.add_conditional_edges("coordinator_agent", coOrdinator_agent_router_edge, {"product_qna_agent": "product_qna_agent", "shopping_cart_agent": "shopping_cart_agent", END: END})
+    graphbuilder2.add_conditional_edges("product_qna_agent", product_qa_router_edge, {"tools": "product_qna_tools", "coordinator_agent": "coordinator_agent"})
+    graphbuilder2.add_conditional_edges("shopping_cart_agent", shopping_cart_router_edge, {"tools": "shopping_cart_tools", "coordinator_agent": "coordinator_agent"})
+
+    graphbuilder2.add_edge("product_qna_tools", "product_qna_agent")
+    graphbuilder2.add_edge("shopping_cart_tools", "shopping_cart_agent")
 
     return graphbuilder2
 
-
-tools=[retrieve_products, get_formatted_reviews_context]
-tool_descriptions = get_tool_descriptions(tools)
-
-def run_agent(question, thread_id):
-    
-    graph_builder = build_graph()
-    
-    initial_state = {
-    "messages": [question],
-    "available_tools": tool_descriptions,
-    "iteration": 0,
-    "final_answer": False,
-    }
-
-    thread_config = {
-        "configurable": {
-            "thread_id": thread_id
-        }
-    }
-
-    with PostgresSaver.from_conn_string(config.postgres_url) as saver:
-        
-        graph = graph_builder.compile(checkpointer=saver)
-        result = graph.invoke(initial_state, config=thread_config)
-    
-    return result
-    
-def rag_pipeline_wrapper(question, thread_id=None):
-    
-    qdrant_client = QdrantClient(   
-        url=config.qdrant_url,
-    )
-    
-    result = run_agent(question, thread_id)
-    
-    used_context = []
-    
-    dummy_vector = np.zeros(1536).tolist()
-        
-    for item in result.get("references"):
-        payload = qdrant_client.query_points(
-            collection_name="amazon_items-collection-hybrid-02",
-            query=dummy_vector,
-            limit=1,
-            with_payload=True,
-            using="text-embedding-3-small",
-            with_vectors=False,
-            query_filter=Filter(
-                must=[
-                    FieldCondition(
-                        key="parent_asin",
-                        match=MatchValue(value=item.id)
-                    )
-                ]
-            )
-        )
-        if payload.points[0].payload["parent_asin"]:
-            image_url = payload.points[0].payload.get("image", None)
-            price = payload.points[0].payload.get("price", None)
-            if image_url:
-                used_context.append({
-                    "id": item.id,
-                    "description": item.description,
-                    "image_url": image_url,
-                    "price": price
-                })
-            
-    return {
-        "answer": result.get("answer", ""),
-        "used_context": used_context,
-        "trace_id": result.get("trace_id", None)
-    }
     
 def _process_graph_event(chunk):
         mode, payload = chunk
@@ -150,24 +102,31 @@ def _process_graph_event(chunk):
                 if search_query:
                     return f"Searching products for: {search_query}"
                 return "Searching relevant products"
-            if tool_name == "get_formatted_reviews_context":
+            if tool_name == "fetch_formatted_reviews_context":
                 return "Reading relevant user reviews"
+            if tool_name == "add_to_shopping_cart":
+                return "Updating your shopping cart"
+            if tool_name == "read_shopping_cart":
+                return "Fetching your current cart"
+            if tool_name == "remove_item_from_cart":
+                return "Removing item from your cart"
             if tool_name:
                 return f"Running tool: {tool_name}"
             return "Running tool"
 
         def _event_message_for_node(node_name):
             node_messages = {
-                "router": "Understanding your request...",
-                "query_rewriter": "Refining the search query...",
-                "agent_node": "Planning the best response...",
-                "tools": "Gathering product and review evidence...",
+                "coordinator_agent": "Planning next best step...",
+                "product_qna_agent": "Analyzing products and drafting response...",
+                "shopping_cart_agent": "Processing your cart request...",
+                "product_qna_tools": "Gathering product and review evidence...",
+                "shopping_cart_tools": "Applying shopping cart actions...",
             }
             return node_messages.get(node_name, False)
 
         if mode == "debug" and isinstance(payload, dict) and payload.get("type") == "task":
             node_name = payload.get("payload", {}).get("name")
-            if node_name == "tools":
+            if node_name in {"product_qna_tools", "shopping_cart_tools"}:
                 input_payload = payload.get("payload", {}).get("input", {})
                 tool_calls = getattr(input_payload, "tool_calls", None)
                 if tool_calls is None and isinstance(input_payload, dict):
@@ -180,13 +139,15 @@ def _process_graph_event(chunk):
             node_name = next(iter(payload.keys()))
             node_update = payload.get(node_name, {}) or {}
 
-            if node_name == "agent_node":
+            if node_name in {"coordinator_agent", "product_qna_agent", "shopping_cart_agent"}:
                 if node_update.get("final_answer"):
-                    return "Finalizing the answer..."
+                    if node_name == "coordinator_agent":
+                        return "Finalizing your response..."
+                    return "Sending result back to coordinator..."
                 if node_update.get("tool_calls"):
                     return "Selecting tools to gather evidence..."
-            if node_name == "tools":
-                return "Processing retrieved context..."
+            if node_name in {"product_qna_tools", "shopping_cart_tools"}:
+                return "Processing tool output..."
             return _event_message_for_node(node_name)
 
         return False
@@ -201,20 +162,36 @@ def rag_agent_stream_wrapper(question, thread_id=None):
     )
     
     graph_builder = build_graph()
-
-
+    
     initial_state = {
-    "messages": [question],
-    "available_tools": tool_descriptions,
-    "iteration": 0,
-    "final_answer": False,
-    }
-
-    thread_config = {
-        "configurable": {
-            "thread_id": thread_id
+        "messages": [{"role": "user", "content": question}],
+        "user_id": "krishnak",
+        "cart_id": thread_id,
+        "product_qna_agent": {
+            "iteration": 0,
+            "final_answer": False,
+            "available_tools": product_qna_agent_tools_descriptions,
+            "tool_calls": []
+        },
+        "shopping_cart_agent": {
+            "iteration": 0,
+            "final_answer": False,
+            "available_tools": shopping_cart_tool_descriptions,
+            "tool_calls": []
+        },
+        "co_ordinator_agent": {
+            "iteration": 0,
+            "final_answer": False,
+            "plan": [],
+            "next_agent": ""
         }
     }
+    
+    thread_config = {
+            "configurable": {
+                "thread_id": thread_id
+            }
+        }
 
     result = {}
     with PostgresSaver.from_conn_string(config.postgres_url) as saver:
@@ -265,11 +242,24 @@ def rag_agent_stream_wrapper(question, thread_id=None):
                     "image_url": image_url,
                     "price": price
                 })
-            
+    
+    shopping_cart = read_shopping_cart("krishnak", thread_id)
+    shopping_cart_items = [
+        {
+            "price": float(item.get("price")) if item.get("price") else None,
+            "quantity": item.get("quantity"),
+            "currency": item.get("currency"),
+            "product_image_url": item.get("product_image_url"),
+            "total_price": float(item.get("total_price")) if item.get("total_price") else None
+        }
+        for item in shopping_cart
+    ]
+    
     yield _string_for_sse(json.dumps(
         {
             "answer": result.get("answer", ""),
             "used_context": used_context,
+            "shopping_cart_items": shopping_cart_items,
             "trace_id": result.get("trace_id", None)
         }))
     yield "data: [DONE]\n\n"

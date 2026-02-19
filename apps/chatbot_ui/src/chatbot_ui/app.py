@@ -11,7 +11,12 @@ st.set_page_config(page_title="Amazon Product Assistant", layout="wide")
 st.markdown(
     """
     <style>
-      .block-container {padding-top: 1.2rem; padding-bottom: 3rem;}
+      .block-container {padding-top: 1.5rem; padding-bottom: 1rem;}
+      header[data-testid="stHeader"] {height: 2rem;}
+      div[data-testid="stChatMessage"] {padding-top: 0.4rem; padding-bottom: 0.4rem;}
+      hr {margin-top: 0.3rem; margin-bottom: 0.3rem;}
+      .stMarkdown h3 {margin-bottom: 0.1rem;}
+      .stCaption {margin-bottom: 0.2rem;}
       .context-card {
         border: 1px solid #e5e7eb;
         border-radius: 12px;
@@ -37,9 +42,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.title("Amazon Product Assistant")
-st.caption("Ask about items in our inventory and see the products used.")
-st.divider()
+st.markdown("### Amazon Product Assistant")
 
 
 def api_call(method, url, **kwargs):
@@ -150,6 +153,46 @@ def render_used_context(context_items, container):
         )
 
 
+def render_shopping_cart(cart_items, container):
+    container.markdown("**Shopping cart**")
+    if not cart_items:
+        container.caption("Your cart is empty.")
+        return
+
+    total_amount = sum(float(item.get("total_price") or 0) for item in cart_items)
+    container.caption(f"Items: {len(cart_items)} | Cart total: ${total_amount:.2f}")
+
+    for item in cart_items:
+        image_url = item.get("product_image_url")
+        quantity = item.get("quantity")
+        price = item.get("price")
+        total_price = item.get("total_price")
+
+        meta_lines = []
+        if quantity is not None:
+            meta_lines.append(f"Qty: {quantity}")
+        if price is not None:
+            meta_lines.append(f"Unit price: ${float(price):.2f}")
+        if total_price is not None:
+            meta_lines.append(f"Line total: ${float(total_price):.2f}")
+        meta_html = "<br/>".join(meta_lines)
+
+        image_html = (
+            f'<img class="suggestion-image" src="{html.escape(image_url)}" alt="cart item image" />'
+            if image_url
+            else '<div class="suggestion-image"></div>'
+        )
+        container.markdown(
+            f"""
+            <div class="context-card suggestion-card">
+              {image_html}
+              {f'<div class="context-meta">{meta_html}</div>' if meta_html else ''}
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+
 def get_feedback_url():
     base_url = config.API_URL.rsplit("/", 1)[0]
     return f"{base_url}/feedback"
@@ -173,6 +216,8 @@ if "messages" not in st.session_state:
     st.session_state.messages = [{"role": "assistant", "content": "Hello, how can I help you on Amazon Products?"}]
 if "latest_context" not in st.session_state:
     st.session_state.latest_context = []
+if "shopping_cart_items" not in st.session_state:
+    st.session_state.shopping_cart_items = []
 if "feedback" not in st.session_state:
     st.session_state.feedback = {}
 if "feedback_open" not in st.session_state:
@@ -246,9 +291,11 @@ if prompt := st.chat_input("Hello, how can I help you on Amazon Products?"):
             status_placeholder.empty()
             answer = final_payload.get("answer", "")
             used_context = final_payload.get("used_context", [])
+            shopping_cart_items = final_payload.get("shopping_cart_items", [])
             run_id = final_payload.get("trace_id") if final_payload.get("trace_id") else None
             st.write(answer)
             st.session_state.latest_context = used_context
+            st.session_state.shopping_cart_items = shopping_cart_items
             st.session_state.messages.append(
                 {"role": "assistant", "content": answer, "run_id": run_id}
             )
@@ -263,9 +310,16 @@ with st.sidebar:
             {"role": "assistant", "content": "Hello, how can I help you on Amazon Products?"}
         ]
         st.session_state.latest_context = []
+        st.session_state.shopping_cart_items = []
         st.rerun()
-    if st.session_state.latest_context:
-        render_used_context(st.session_state.latest_context, st.sidebar)
-    else:
-        st.markdown("**Suggestions**")
-        st.caption("Ask a question to see related products here.")
+    suggestions_tab, cart_tab = st.tabs(["Suggestions", "Shopping cart"])
+
+    with suggestions_tab:
+        if st.session_state.latest_context:
+            render_used_context(st.session_state.latest_context, suggestions_tab)
+        else:
+            st.markdown("**Suggestions**")
+            st.caption("Ask a question to see related products here.")
+
+    with cart_tab:
+        render_shopping_cart(st.session_state.shopping_cart_items, cart_tab)

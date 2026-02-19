@@ -18,4 +18,4 @@ async def amazon_product_assistant(request: Request, payload: RAGRequest) -> Str
 
 
 api_router = APIRouter()
-api_router.include_router(router, prefix="/product_assistant", tags=["rag"])
+api_router.include_router(router, prefix="/product_assistant", tags=["agent"])

@@ -1,9 +1,9 @@
 import inspect
 import json
-from typing import Any, Callable, Dict, List
-from pydantic import TypeAdapter, create_model, Field
+from typing import Any, Callable, Dict, List, get_type_hints
+from pydantic import BaseModel, TypeAdapter, create_model, Field
+from pydantic.fields import FieldInfo
 from langchain_core.messages import AIMessage
-from docstring_parser import parse
 
 # #### FORMAT AI MESSAGE (Cleaner approach) ####
 def format_ai_message(response) -> AIMessage:
@@ -47,6 +47,11 @@ def format_ai_message(response) -> AIMessage:
         tool_calls=tool_calls,
     )
 
+import inspect
+from typing import Any, Callable, Dict, List
+from pydantic import create_model, Field
+from docstring_parser import parse
+
 # --- CORE LOGIC (The New Engine) ---
 def _generate_openai_schema(func: Callable) -> Dict[str, Any]:
     """Internal robust generator using Pydantic + Inspect."""
@@ -56,8 +61,7 @@ def _generate_openai_schema(func: Callable) -> Dict[str, Any]:
     
     fields = {}
     for name, param in inspect.signature(func).parameters.items():
-        if name in ('self', 'cls'): 
-            continue
+        if name in ('self', 'cls'): continue
         fields[name] = (
             param.annotation if param.annotation != inspect.Parameter.empty else Any,
             Field(
@@ -138,4 +142,5 @@ def normalize_tool_calls(ai_msg: AIMessage) -> AIMessage:
         content=ai_msg.content or "",
         tool_calls=fixed_calls,
         additional_kwargs=ai_msg.additional_kwargs,
-        response_metadata=ai_msg.response_metadata)
+        response_metadata=ai_msg.response_metadata,
+    )

@@ -14,5 +14,6 @@ class Config(BaseSettings):
     groq_api_key: str
     qdrant_url: str = "http://localhost:6333"
     postgres_url: str = "postgresql://langgraph_user:langgraph_password@postgres:5432/langgraph_db"
+    tools_db_url: str = "postgresql://langgraph_user:langgraph_password@postgres:5432/"
 
 config = Config()
