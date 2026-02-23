@@ -1,8 +1,10 @@
 from server.agents.models import State
 from langgraph.graph import StateGraph, START, END
 from langgraph.prebuilt import ToolNode
-from server.agents.tools import retrieve_products, fetch_formatted_reviews_context, add_to_shopping_cart, read_shopping_cart, remove_item_from_cart
-from server.agents.agents import product_qna_agent_node, shopping_cart_agent_node, coordinator_agent_node
+from server.agents.tools import retrieve_products, fetch_formatted_reviews_context
+from server.agents.tools import add_to_shopping_cart, read_shopping_cart, remove_item_from_cart, check_warehouse_availability
+from server.agents.tools import reserve_warehouse_items
+from server.agents.agents import product_qna_agent_node, shopping_cart_agent_node, coordinator_agent_node, warehouse_manager_agent_node
 from typing import Literal
 from qdrant_client import QdrantClient
 from qdrant_client.models import Filter, FieldCondition, MatchValue
@@ -40,8 +42,21 @@ def shopping_cart_router_edge(state: State) -> Literal["tools", "coordinator_age
         return "coordinator_agent"
     else:
         return "coordinator_agent"
+
+def warehouse_manager_router_edge(state: State) -> Literal["tools", "coordinator_agent"]:
+    """
+    Routes warehouse manager agent output to tools or back to coordinator.
+    """
+    if state.warehouse_manager_agent.iteration > 3:
+        return "coordinator_agent"
+    elif len(state.warehouse_manager_agent.tool_calls) > 0:
+        return "tools"
+    if state.warehouse_manager_agent.final_answer:
+        return "coordinator_agent"
+    else:
+        return "coordinator_agent"
     
-def coOrdinator_agent_router_edge(state: State) -> Literal["product_qna_agent", "shopping_cart_agent", END]:
+def coOrdinator_agent_router_edge(state: State) -> Literal["product_qna_agent", "shopping_cart_agent", "warehouse_manager_agent", END]:
     """
     This function decides the next node to execute based on the user query
     """
@@ -53,6 +68,8 @@ def coOrdinator_agent_router_edge(state: State) -> Literal["product_qna_agent", 
         return "product_qna_agent"
     elif state.co_ordinator_agent.next_agent == "shopping_cart_agent":
         return "shopping_cart_agent"
+    elif state.co_ordinator_agent.next_agent == "warehouse_manager_agent":
+        return "warehouse_manager_agent"
     else:
         return END
 
@@ -61,28 +78,37 @@ product_qna_agent_tools_descriptions = get_tool_descriptions(product_qna_agent_t
 
 shopping_cart_agent_tools=[add_to_shopping_cart, remove_item_from_cart, read_shopping_cart]
 shopping_cart_tool_descriptions = get_tool_descriptions(shopping_cart_agent_tools)
+
+warehouse_manager_agent_tools = [check_warehouse_availability, reserve_warehouse_items]
+warehouse_manager_tool_descriptions = get_tool_descriptions(warehouse_manager_agent_tools)
+
     
 def build_graph():
     graphbuilder2 = StateGraph(State)
+
     qna_tools_node = ToolNode(tools=product_qna_agent_tools)
-    shopping_cart_tools_node = ToolNode(tools=shopping_cart_agent_tools)
+    shopping_cart_tools_node = ToolNode(tools=shopping_cart_agent_tools)   
+    warehouse_manager_tools_node = ToolNode(tools=warehouse_manager_agent_tools)
 
     graphbuilder2.add_node("coordinator_agent", coordinator_agent_node)
     graphbuilder2.add_node("product_qna_agent", product_qna_agent_node)
     graphbuilder2.add_node("shopping_cart_agent", shopping_cart_agent_node)
+    graphbuilder2.add_node("warehouse_manager_agent", warehouse_manager_agent_node)
 
     graphbuilder2.add_node("product_qna_tools", qna_tools_node)
     graphbuilder2.add_node("shopping_cart_tools", shopping_cart_tools_node)
+    graphbuilder2.add_node("warehouse_manager_tools", warehouse_manager_tools_node)
 
     graphbuilder2.add_edge(START, "coordinator_agent")
 
-    graphbuilder2.add_conditional_edges("coordinator_agent", coOrdinator_agent_router_edge, {"product_qna_agent": "product_qna_agent", "shopping_cart_agent": "shopping_cart_agent", END: END})
+    graphbuilder2.add_conditional_edges("coordinator_agent", coOrdinator_agent_router_edge, {"product_qna_agent": "product_qna_agent", "shopping_cart_agent": "shopping_cart_agent", "warehouse_manager_agent": "warehouse_manager_agent", END: END})
     graphbuilder2.add_conditional_edges("product_qna_agent", product_qa_router_edge, {"tools": "product_qna_tools", "coordinator_agent": "coordinator_agent"})
     graphbuilder2.add_conditional_edges("shopping_cart_agent", shopping_cart_router_edge, {"tools": "shopping_cart_tools", "coordinator_agent": "coordinator_agent"})
+    graphbuilder2.add_conditional_edges("warehouse_manager_agent", warehouse_manager_router_edge, {"tools": "warehouse_manager_tools", "coordinator_agent": "coordinator_agent"})
 
     graphbuilder2.add_edge("product_qna_tools", "product_qna_agent")
     graphbuilder2.add_edge("shopping_cart_tools", "shopping_cart_agent")
-
+    graphbuilder2.add_edge("warehouse_manager_tools", "warehouse_manager_agent")
     return graphbuilder2
 
     
@@ -178,6 +204,12 @@ def rag_agent_stream_wrapper(question, thread_id=None):
             "final_answer": False,
             "available_tools": shopping_cart_tool_descriptions,
             "tool_calls": []
+        },
+        "warehouse_manager_agent": {
+        "iteration": 0,
+        "final_answer": False,
+        "available_tools": warehouse_manager_tool_descriptions,
+        "tool_calls": []
         },
         "co_ordinator_agent": {
             "iteration": 0,

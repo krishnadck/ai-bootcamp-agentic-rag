@@ -4,8 +4,11 @@ from langgraph.graph.message import add_messages
 from operator import add
 
 class Toolcall(BaseModel):
-    name: str
-    arguments: dict
+    name: str = Field(description="Exact tool name from the available tools list")
+    arguments: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Dictionary of ALL required parameters for the tool."
+    )
     
 class RAGUsedContext(BaseModel):
     id: str = Field(description="The ID of the item used to answer the question")
@@ -54,9 +57,14 @@ class State(BaseModel):
     user_intent: str = ""
     product_qna_agent: AgentProperties = Field(default_factory=AgentProperties)
     shopping_cart_agent: AgentProperties = Field(default_factory=AgentProperties)
+    warehouse_manager_agent: AgentProperties = Field(default_factory=AgentProperties)
     co_ordinator_agent: CoOrdinatorAgentProperties = Field(default_factory=CoOrdinatorAgentProperties)
-    references: Annotated[List[RAGUsedContext], add] = []
     answer: str = ""
     user_id: str = ""
     cart_id: str = ""
-    trace_id: str = Field(description="The trace ID of the run", default=None)
+    references: List[RAGUsedContext] = []
+
+class WarehouseManagerAgentResponse(BaseModel):
+    answer: str = Field(description="Answer to the question.")
+    final_answer: bool = False
+    tool_calls: List[Toolcall] = []

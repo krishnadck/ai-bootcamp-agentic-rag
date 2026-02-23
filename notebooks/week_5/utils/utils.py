@@ -1,16 +1,17 @@
 import inspect
 import json
+import re
 from typing import Any, Callable, Dict, List, get_type_hints
 from pydantic import BaseModel, TypeAdapter, create_model, Field
 from pydantic.fields import FieldInfo
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, HumanMessage
 
 # #### FORMAT AI MESSAGE (Cleaner approach) ####
-def format_ai_message(response) -> AIMessage:
+def format_ai_message(response, *, name: str = "") -> AIMessage:
     """
     Standardizes the response. 
-    Note: Modern frameworks usually handle object conversion, 
-    but this keeps your logic explicit.
+    ``name`` is attached to the AIMessage so downstream agents
+    (e.g. the coordinator) can see which agent produced it.
     """
     tool_calls = []
 
@@ -42,10 +43,78 @@ def format_ai_message(response) -> AIMessage:
                 }
             )
 
+    content = ""
+    for field in ("content", "answer"):
+        val = getattr(response, field, None)
+        if val:
+            content = val
+            break
+
     return AIMessage(
-        content=response.content if hasattr(response, "content") else "",
+        content=content,
         tool_calls=tool_calls,
+        name=name or "",
     )
+
+
+def _extract_last_user_query(messages) -> str:
+    """Walk backwards through messages to find the last human query."""
+    for msg in reversed(messages):
+        if isinstance(msg, HumanMessage):
+            return msg.content
+        if isinstance(msg, dict) and msg.get("type") == "human":
+            return msg.get("content", "")
+        if hasattr(msg, "type") and getattr(msg, "type", None) == "human":
+            return getattr(msg, "content", "")
+    return ""
+
+
+def _extract_product_ids_from_messages(messages) -> list:
+    """Scan tool output messages for Product IDs (parent_asin pattern)."""
+    product_ids = []
+    for msg in messages:
+        content = ""
+        if hasattr(msg, "content"):
+            content = msg.content or ""
+        elif isinstance(msg, dict):
+            content = msg.get("content", "")
+        for match in re.findall(r"Product ID:\s*(B[A-Z0-9]+)", content):
+            if match not in product_ids:
+                product_ids.append(match)
+    return product_ids
+
+
+def patch_empty_tool_arguments(response, messages, *, user_id: str = "", cart_id: str = ""):
+    """Fix tool calls where the LLM omitted the arguments (common with
+    instructor TOOLS mode + generic dict fields at temperature=0).
+    Mutates ``response.tool_calls`` in-place."""
+    user_query = _extract_last_user_query(messages)
+
+    for tc in response.tool_calls:
+        args = getattr(tc, "arguments", None) or {}
+        if args:
+            continue
+
+        if tc.name == "retrieve_products":
+            tc.arguments = {"query": user_query}
+
+        elif tc.name == "get_formatted_reviews_context":
+            product_ids = _extract_product_ids_from_messages(messages)
+            tc.arguments = {
+                "query": user_query,
+                "item_list": product_ids,
+                "top_k": 20,
+            }
+
+        elif tc.name in ("add_to_shopping_cart", "read_shopping_cart", "remove_item_from_cart"):
+            tc.arguments = {"user_id": user_id, "cart_id": cart_id}
+
+        elif tc.name == "check_warehouse_availability":
+            tc.arguments = {"items": []}
+
+        elif tc.name == "reserve_warehouse_items":
+            tc.arguments = {"reservations": []}
+
 
 import inspect
 from typing import Any, Callable, Dict, List

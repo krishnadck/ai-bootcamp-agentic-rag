@@ -2,6 +2,12 @@ run-docker-compose:
 	uv sync
 	docker compose up --build
 
+stop-docker-compose:
+	docker compose down
+
+stop-docker-compose-clean:
+	docker compose down -v --remove-orphans
+
 clean-notebook-outputs:
 	uv run jupyter nbconvert --clear-output --inplace notebooks/*/*.ipynb
 

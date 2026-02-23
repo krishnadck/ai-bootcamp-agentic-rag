@@ -7,8 +7,8 @@ from langsmith import traceable
 from server.agents.utils.utils import format_ai_message
 from langchain_core.messages import AIMessage, convert_to_openai_messages
 from langsmith import get_current_run_tree
-from server.agents.models import ProductQnAAgentResponse, ShoppingCartAgentResponse, CoOrdinatorAgentResponse
-from server.agents.utils.utils import normalize_tool_calls
+from server.agents.models import ProductQnAAgentResponse, ShoppingCartAgentResponse, CoOrdinatorAgentResponse, WarehouseManagerAgentResponse
+from server.agents.utils.utils import normalize_tool_calls, patch_empty_tool_arguments
 
 
 def sanitize_history(messages):
@@ -74,13 +74,13 @@ def product_qna_agent_node(state: State) -> State:
     for message in messages:
         conversation.append(convert_to_openai_messages(message))
         
-    client = instructor.from_openai(OpenAI())
+    client = instructor.from_openai(OpenAI(), mode=instructor.Mode.JSON)
 
     response, raw_response = client.chat.completions.create_with_completion(
-        model="gpt-4o-mini",
+        model="gpt-4.1",
         response_model=ProductQnAAgentResponse,
         messages=[{"role": "system", "content": prompt}, *conversation],
-        temperature=0,
+        temperature=0.3,
     )
     
     current_run = get_current_run_tree()
@@ -92,10 +92,11 @@ def product_qna_agent_node(state: State) -> State:
             "total_tokens": raw_response.usage.total_tokens
         }
     
-    ai_message = format_ai_message(response)
-    
+    patch_empty_tool_arguments(response, state.messages)
+
+    ai_message = format_ai_message(response, name="product_qna_agent")
+
     ai_message = normalize_tool_calls(ai_message)
-    
 
     return {
         "messages": [ai_message],
@@ -126,10 +127,10 @@ def shopping_cart_agent_node(state: State) -> State:
     for message in state.messages:
         conversation.append(convert_to_openai_messages(message))
         
-    client = instructor.from_openai(OpenAI())
+    client = instructor.from_openai(OpenAI(), mode=instructor.Mode.JSON)
     
     response, raw_response = client.chat.completions.create_with_completion(
-        model="gpt-4o-mini",
+        model="gpt-4.1-mini",
         response_model=ShoppingCartAgentResponse,
         messages=[{"role": "system", "content": prompt}, *conversation],
         temperature=0,
@@ -144,9 +145,9 @@ def shopping_cart_agent_node(state: State) -> State:
             "total_tokens": raw_response.usage.total_tokens
         }
     
-    ai_message = format_ai_message(response)
-    
-    ai_message = normalize_tool_calls(ai_message)
+    patch_empty_tool_arguments(response, state.messages, user_id=state.user_id, cart_id=state.cart_id)
+
+    ai_message = format_ai_message(response, name="shopping_cart_agent")
     
     return {
         "messages": [ai_message],
@@ -176,10 +177,10 @@ def coordinator_agent_node(state: State) -> State:
     for message in state.messages:
         conversation.append(convert_to_openai_messages(message))
     
-    client = instructor.from_openai(OpenAI())
+    client = instructor.from_openai(OpenAI(), mode=instructor.Mode.JSON)
     
     response, raw_response = client.chat.completions.create_with_completion(
-        model="gpt-4o-mini",
+        model="gpt-4.1-mini",
         response_model=CoOrdinatorAgentResponse,
         messages=[{"role": "system", "content": prompt}, *conversation],
         temperature=0.0
@@ -212,4 +213,46 @@ def coordinator_agent_node(state: State) -> State:
            "next_agent": response.next_agent
        },
        "trace_id": trace_id
+    }
+
+
+def warehouse_manager_agent_node(state: State) -> State:
+    """
+    Warehouse Manager agent – checks item availability across warehouses
+    and reserves inventory based on the user's request.
+    """
+
+    template = get_prompt_from_config('/app/apps/api/src/server/agents/prompts/warehouse_agent.yml', 'warehouse_agent')
+
+    prompt = template.render(
+        available_tools=state.warehouse_manager_agent.available_tools,
+    )
+
+    conversation = []
+    for message in state.messages:
+        conversation.append(convert_to_openai_messages(message))
+
+    client = instructor.from_openai(OpenAI(), mode=instructor.Mode.JSON)
+
+    response, raw_response = client.chat.completions.create_with_completion(
+        model="gpt-4.1-mini",
+        response_model=WarehouseManagerAgentResponse,
+        messages=[{"role": "system", "content": prompt}, *conversation],
+        temperature=0.3,
+    )
+
+    patch_empty_tool_arguments(response, state.messages)
+
+    ai_message = format_ai_message(response, name="warehouse_manager_agent")
+    ai_message = normalize_tool_calls(ai_message)
+
+    return {
+        "messages": [ai_message],
+        "warehouse_manager_agent": {
+            "tool_calls": [tool_call.model_dump() for tool_call in response.tool_calls],
+            "iteration": state.warehouse_manager_agent.iteration + 1,
+            "final_answer": response.final_answer,
+            "available_tools": state.warehouse_manager_agent.available_tools,
+        },
+        "answer": response.answer,
     }
