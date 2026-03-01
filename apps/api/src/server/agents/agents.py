@@ -9,6 +9,7 @@ from langchain_core.messages import AIMessage, convert_to_openai_messages
 from langsmith import get_current_run_tree
 from server.agents.models import ProductQnAAgentResponse, ShoppingCartAgentResponse, CoOrdinatorAgentResponse, WarehouseManagerAgentResponse
 from server.agents.utils.utils import normalize_tool_calls, patch_empty_tool_arguments
+from litellm import completion
 
 
 def sanitize_history(messages):
@@ -59,13 +60,11 @@ def sanitize_history(messages):
 description="This function uses the RAG pipeline to perform search on the products",
 run_type="llm"
 )
-def product_qna_agent_node(state: State) -> State:
+def product_qna_agent_node(state: State, models=["gpt-4.1", "gemini-2.5-flash"]) -> State:
     """
     This function uses the RAG pipeline to perform search on the products
     """
-    template = get_prompt_from_config('/app/apps/api/src/server/agents/prompts/search_agent.yml', 'search_agent')
     
-    prompt = template.render(available_tools=state.product_qna_agent.available_tools)
 
     messages = sanitize_history(state.messages)
     
@@ -74,14 +73,30 @@ def product_qna_agent_node(state: State) -> State:
     for message in messages:
         conversation.append(convert_to_openai_messages(message))
         
-    client = instructor.from_openai(OpenAI(), mode=instructor.Mode.JSON)
+    client = instructor.from_litellm(completion, mode=instructor.Mode.JSON)
 
-    response, raw_response = client.chat.completions.create_with_completion(
-        model="gpt-4.1",
-        response_model=ProductQnAAgentResponse,
-        messages=[{"role": "system", "content": prompt}, *conversation],
-        temperature=0.3,
-    )
+    for model in models:
+        
+        template = get_prompt_from_config('/app/apps/api/src/server/agents/prompts/search_agent.yml', model)
+        prompt = template.render(available_tools=state.product_qna_agent.available_tools)
+        
+        try:
+            response, raw_response = client.chat.completions.create_with_completion(
+            model=model,
+            response_model=ProductQnAAgentResponse,
+            messages=[{"role": "system", "content": prompt}, *conversation],
+            temperature=0.3
+            )
+        except Exception as e:
+            print(f"Error with {model}: {e}")
+            print("continue with next model")
+            continue
+        
+        if response:
+            break
+    
+    if response is None:
+        raise Exception("No response from any model")
     
     current_run = get_current_run_tree()
     
@@ -114,27 +129,37 @@ def product_qna_agent_node(state: State) -> State:
 description="This function uses the Shopping Cart tools to add, get and remove items from the cart.",
 run_type="llm"
 )
-def shopping_cart_agent_node(state: State) -> State:
+def shopping_cart_agent_node(state: State, models=["gpt-4.1-mini", "gemini-2.5-flash"]) -> State:
     """
     This function uses the Shopping Cart tools to add, get and remove items from the cart.
     """
-    
-    template = get_prompt_from_config('/app/apps/api/src/server/agents/prompts/shopping_cart_agent.yml', 'shopping_cart_agent')
-    
-    prompt = template.render(user_id=state.user_id, cart_id=state.cart_id, available_tools=state.shopping_cart_agent.available_tools)
     
     conversation = []
     for message in state.messages:
         conversation.append(convert_to_openai_messages(message))
         
-    client = instructor.from_openai(OpenAI(), mode=instructor.Mode.JSON)
+    client = instructor.from_litellm(completion, mode=instructor.Mode.JSON)
     
-    response, raw_response = client.chat.completions.create_with_completion(
-        model="gpt-4.1-mini",
-        response_model=ShoppingCartAgentResponse,
-        messages=[{"role": "system", "content": prompt}, *conversation],
-        temperature=0,
-    )
+    for model in models:
+        template = get_prompt_from_config('/app/apps/api/src/server/agents/prompts/shopping_cart_agent.yml', model)
+        prompt = template.render(user_id=state.user_id, cart_id=state.cart_id, available_tools=state.shopping_cart_agent.available_tools)
+        
+        try:
+            response, raw_response = client.chat.completions.create_with_completion(
+                model=model,
+                response_model=ShoppingCartAgentResponse,
+                messages=[{"role": "system", "content": prompt}, *conversation],
+                temperature=0)
+        except Exception as e:
+            print(f"Error with {model}: {e}")
+            print("continue with next model")
+            continue
+        
+        if response:
+            break
+    
+    if response is None:
+        raise Exception("No response from any model")    
     
     current_run = get_current_run_tree()
     
@@ -164,27 +189,39 @@ def shopping_cart_agent_node(state: State) -> State:
 description="This function evaluates the user query and decides the next node to execute",
 run_type="llm"
 )
-def coordinator_agent_node(state: State) -> State:
+def coordinator_agent_node(state: State, models=["gpt-4.1-mini", "gemini-2.5-flash"]) -> State:
     """
     This function evaluates the user query and decides the next node to execute
     """
-    prompt_template = get_prompt_from_config('/app/apps/api/src/server/agents/prompts/coordinator_agent.yml', 'coordinator_agent')
-    
-    prompt = prompt_template.render()
     
     conversation = []
     
     for message in state.messages:
         conversation.append(convert_to_openai_messages(message))
     
-    client = instructor.from_openai(OpenAI(), mode=instructor.Mode.JSON)
+    client = instructor.from_litellm(completion, mode=instructor.Mode.JSON)
     
-    response, raw_response = client.chat.completions.create_with_completion(
-        model="gpt-4.1-mini",
-        response_model=CoOrdinatorAgentResponse,
-        messages=[{"role": "system", "content": prompt}, *conversation],
-        temperature=0.0
-    )
+    for model in models:
+        template = get_prompt_from_config('/app/apps/api/src/server/agents/prompts/coordinator_agent.yml', model)
+        prompt = template.render()
+        
+        try:
+            response, raw_response = client.chat.completions.create_with_completion(
+                model=model,
+                response_model=CoOrdinatorAgentResponse,
+                messages=[{"role": "system", "content": prompt}, *conversation],
+                temperature=0.0
+            )
+        except Exception as e:
+            print(f"Error with {model}: {e}")
+            print("continue with next model")
+            continue
+        
+        if response:
+            break
+    
+    if response is None:
+        raise Exception("No response from any model")
     
     current_run = get_current_run_tree()
     
@@ -216,31 +253,47 @@ def coordinator_agent_node(state: State) -> State:
     }
 
 
-def warehouse_manager_agent_node(state: State) -> State:
+def warehouse_manager_agent_node(state: State, models=["gpt-4.1-mini", "gemini-2.5-flash"]) -> State:
     """
     Warehouse Manager agent – checks item availability across warehouses
     and reserves inventory based on the user's request.
     """
 
-    template = get_prompt_from_config('/app/apps/api/src/server/agents/prompts/warehouse_agent.yml', 'warehouse_agent')
-
-    prompt = template.render(
-        available_tools=state.warehouse_manager_agent.available_tools,
-    )
-
     conversation = []
     for message in state.messages:
         conversation.append(convert_to_openai_messages(message))
 
-    client = instructor.from_openai(OpenAI(), mode=instructor.Mode.JSON)
+    client = instructor.from_litellm(completion, mode=instructor.Mode.JSON)
 
-    response, raw_response = client.chat.completions.create_with_completion(
-        model="gpt-4.1-mini",
-        response_model=WarehouseManagerAgentResponse,
-        messages=[{"role": "system", "content": prompt}, *conversation],
-        temperature=0.3,
-    )
-
+    for model in models:
+        template = get_prompt_from_config('/app/apps/api/src/server/agents/prompts/warehouse_agent.yml', model)
+        prompt = template.render(available_tools=state.warehouse_manager_agent.available_tools)
+        
+        try:
+            response, raw_response = client.chat.completions.create_with_completion(
+                model=model,
+                response_model=WarehouseManagerAgentResponse,
+                messages=[{"role": "system", "content": prompt}, *conversation],
+                temperature=0.3)
+        except Exception as e:
+            print(f"Error with {model}: {e}")
+            print("continue with next model")
+        
+        if response:
+            break
+        
+    if response is None:
+        raise Exception("No response from any model")
+    
+    current_run = get_current_run_tree()
+    
+    if current_run:
+        current_run.metadata["usage_metadata"] = {
+            "input_tokens": raw_response.usage.prompt_tokens,
+            "output_tokens": raw_response.usage.completion_tokens,
+            "total_tokens": raw_response.usage.total_tokens
+        }
+    
     patch_empty_tool_arguments(response, state.messages)
 
     ai_message = format_ai_message(response, name="warehouse_manager_agent")
