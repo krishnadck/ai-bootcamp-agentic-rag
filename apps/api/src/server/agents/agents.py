@@ -104,7 +104,9 @@ def product_qna_agent_node(state: State, models=["gpt-4.1", "gemini-2.5-flash"])
         current_run.metadata["usage_metadata"] = {
             "input_tokens": raw_response.usage.prompt_tokens,
             "output_tokens": raw_response.usage.completion_tokens,
-            "total_tokens": raw_response.usage.total_tokens
+            "total_tokens": raw_response.usage.total_tokens,
+            "cached_tokens": raw_response.usage.prompt_tokens_details.cached_tokens,
+            "model": model,
         }
     
     patch_empty_tool_arguments(response, state.messages)
@@ -167,7 +169,9 @@ def shopping_cart_agent_node(state: State, models=["gpt-4.1-mini", "gemini-2.5-f
         current_run.metadata["usage_metadata"] = {
             "input_tokens": raw_response.usage.prompt_tokens,
             "output_tokens": raw_response.usage.completion_tokens,
-            "total_tokens": raw_response.usage.total_tokens
+            "total_tokens": raw_response.usage.total_tokens,
+            "cached_tokens": raw_response.usage.prompt_tokens_details.cached_tokens,
+            "model": model,
         }
     
     patch_empty_tool_arguments(response, state.messages, user_id=state.user_id, cart_id=state.cart_id)
@@ -229,7 +233,9 @@ def coordinator_agent_node(state: State, models=["gpt-4.1-mini", "gemini-2.5-fla
         current_run.metadata["usage_metadata"] = {
             "input_tokens": raw_response.usage.prompt_tokens,
             "output_tokens": raw_response.usage.completion_tokens,
-            "total_tokens": raw_response.usage.total_tokens
+            "total_tokens": raw_response.usage.total_tokens,
+            "cached_tokens": raw_response.usage.prompt_tokens_details.cached_tokens,
+            "model": model,
         }
         trace_id = str(getattr(current_run, "trace_id", current_run.id))
     else:
@@ -291,7 +297,9 @@ def warehouse_manager_agent_node(state: State, models=["gpt-4.1-mini", "gemini-2
         current_run.metadata["usage_metadata"] = {
             "input_tokens": raw_response.usage.prompt_tokens,
             "output_tokens": raw_response.usage.completion_tokens,
-            "total_tokens": raw_response.usage.total_tokens
+            "total_tokens": raw_response.usage.total_tokens,
+            "cached_tokens": raw_response.usage.prompt_tokens_details.cached_tokens,
+            "model": model,
         }
     
     patch_empty_tool_arguments(response, state.messages)
